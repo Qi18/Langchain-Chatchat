@@ -83,7 +83,7 @@ A7: 可使用本项目用到的模型权重文件百度网盘地址：
 
 Q8: 下载完模型后，如何修改代码以执行本地模型？
 
-A8: 模型下载完成后，请在 [configs/model_config.py](../configs/model_config.py) 文件中，对 `embedding_model_dict`和 `llm_model_dict`参数进行修改，如把 `llm_model_dict`从
+A8: 模型下载完成后，请在 [configs/model_config.py](../configs/model_config.py.old) 文件中，对 `embedding_model_dict`和 `llm_model_dict`参数进行修改，如把 `llm_model_dict`从
 
 ```python
 embedding_model_dict = {
@@ -107,7 +107,7 @@ embedding_model_dict = {
 
 Q9: 执行 `python cli_demo.py`过程中，显卡内存爆了，提示 "OutOfMemoryError: CUDA out of memory"
 
-A9: 将 `VECTOR_SEARCH_TOP_K` 和 `LLM_HISTORY_LEN` 的值调低，比如 `VECTOR_SEARCH_TOP_K = 5` 和 `LLM_HISTORY_LEN = 2`，这样由 `query` 和 `context` 拼接得到的 `prompt` 会变短，会减少内存的占用。或者打开量化，请在 [configs/model_config.py](../configs/model_config.py) 文件中，对 `LOAD_IN_8BIT`参数进行修改
+A9: 将 `VECTOR_SEARCH_TOP_K` 和 `LLM_HISTORY_LEN` 的值调低，比如 `VECTOR_SEARCH_TOP_K = 5` 和 `LLM_HISTORY_LEN = 2`，这样由 `query` 和 `context` 拼接得到的 `prompt` 会变短，会减少内存的占用。或者打开量化，请在 [configs/model_config.py](../configs/model_config.py.old) 文件中，对 `LOAD_IN_8BIT`参数进行修改
 
 ---
 
@@ -169,7 +169,7 @@ A13: 疑为 chatglm 的 quantization 的问题或 torch 版本差异问题，针
 
 Q14: 修改配置中路径后，加载 text2vec-large-chinese 依然提示 `WARNING: No sentence-transformers model found with name text2vec-large-chinese. Creating a new one with MEAN pooling.`
 
-A14: 尝试更换 embedding，如 text2vec-base-chinese，请在 [configs/model_config.py](../configs/model_config.py) 文件中，修改 `text2vec-base`参数为本地路径，绝对路径或者相对路径均可
+A14: 尝试更换 embedding，如 text2vec-base-chinese，请在 [configs/model_config.py](../configs/model_config.py.old) 文件中，修改 `text2vec-base`参数为本地路径，绝对路径或者相对路径均可
 
 ---
 

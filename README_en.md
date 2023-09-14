@@ -230,11 +230,11 @@ $ git clone https://huggingface.co/moka-ai/m3e-base
 ```
 
 ### 3. Setting Configuration
-Copy the model-related parameter configuration template file [configs/model_config.py.example](configs/model_config.py.example) and store it under the project path `. /configs` path and rename it `model_config.py`.
+Copy the model-related parameter configuration template file [configs/model_config.py.example](configs/model_config.py) and store it under the project path `. /configs` path and rename it `model_config.py`.
 
-Copy the service-related parameter configuration template file [configs/server_config.py.example](configs/server_config.py.example) and store it under the project path `. /configs` path and rename it `server_config.py`.
+Copy the service-related parameter configuration template file [configs/server_config.py.example](configs/server_config.py) and store it under the project path `. /configs` path and rename it `server_config.py`.
 
-Before you start executing the Web UI or command line interactions, check that each of the items in [configs/model_config.py](configs/model_config.py) and [configs/server_config.py](configs/server_config.py) The model parameters are designed to meet the requirements:
+Before you start executing the Web UI or command line interactions, check that each of the items in [configs/model_config.py](configs/model_config.py.old) and [configs/server_config.py](configs/server_config.py.old) The model parameters are designed to meet the requirements:
 
 - Please make sure that the local storage path of the downloaded LLM model is written in the `local_model_path` attribute of the corresponding model in `llm_model_dict`, e.g..
 ```
