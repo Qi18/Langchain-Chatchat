@@ -1,4 +1,4 @@
-# 该文件包含webui通用工具，可以被不同的webui使用
+ # 该文件包含webui通用工具，可以被不同的webui使用
 from typing import *
 from pathlib import Path
 from configs import (
@@ -30,9 +30,11 @@ from server.utils import run_async, iter_over_async, set_httpx_config, api_addre
 
 from configs.model_config import NLTK_DATA_PATH
 import nltk
+
 nltk.data.path = [NLTK_DATA_PATH] + nltk.data.path
 from pprint import pprint
-
+from wikiES.query_wiki import search
+import os
 
 KB_ROOT_PATH = Path(KB_ROOT_PATH)
 set_httpx_config()
@@ -44,6 +46,7 @@ class ApiRequest:
     1. 简化api调用方式
     2. 实现无api调用(直接运行server.chat.*中的视图函数获取结果),无需启动api.py
     '''
+
     def __init__(
         self,
         base_url: str = api_address(),
@@ -60,8 +63,8 @@ class ApiRequest:
 
     def _parse_url(self, url: str) -> str:
         if (not url.startswith("http")
-                    and self.base_url
-                ):
+                and self.base_url
+        ):
             part1 = self.base_url.strip(" /")
             part2 = url.strip(" /")
             return f"{part1}/{part2}"
@@ -69,12 +72,12 @@ class ApiRequest:
             return url
 
     def get(
-        self,
-        url: str,
-        params: Union[Dict, List[Tuple], bytes] = None,
-        retry: int = 3,
-        stream: bool = False,
-        **kwargs: Any,
+            self,
+            url: str,
+            params: Union[Dict, List[Tuple], bytes] = None,
+            retry: int = 3,
+            stream: bool = False,
+            **kwargs: Any,
     ) -> Union[httpx.Response, None]:
         url = self._parse_url(url)
         kwargs.setdefault("timeout", self.timeout)
@@ -91,12 +94,12 @@ class ApiRequest:
                 retry -= 1
 
     async def aget(
-        self,
-        url: str,
-        params: Union[Dict, List[Tuple], bytes] = None,
-        retry: int = 3,
-        stream: bool = False,
-        **kwargs: Any,
+            self,
+            url: str,
+            params: Union[Dict, List[Tuple], bytes] = None,
+            retry: int = 3,
+            stream: bool = False,
+            **kwargs: Any,
     ) -> Union[httpx.Response, None]:
         url = self._parse_url(url)
         kwargs.setdefault("timeout", self.timeout)
@@ -114,13 +117,13 @@ class ApiRequest:
                 retry -= 1
 
     def post(
-        self,
-        url: str,
-        data: Dict = None,
-        json: Dict = None,
-        retry: int = 3,
-        stream: bool = False,
-        **kwargs: Any
+            self,
+            url: str,
+            data: Dict = None,
+            json: Dict = None,
+            retry: int = 3,
+            stream: bool = False,
+            **kwargs: Any
     ) -> Union[httpx.Response, None]:
         url = self._parse_url(url)
         kwargs.setdefault("timeout", self.timeout)
@@ -137,13 +140,13 @@ class ApiRequest:
                 retry -= 1
 
     async def apost(
-        self,
-        url: str,
-        data: Dict = None,
-        json: Dict = None,
-        retry: int = 3,
-        stream: bool = False,
-        **kwargs: Any
+            self,
+            url: str,
+            data: Dict = None,
+            json: Dict = None,
+            retry: int = 3,
+            stream: bool = False,
+            **kwargs: Any
     ) -> Union[httpx.Response, None]:
         url = self._parse_url(url)
         kwargs.setdefault("timeout", self.timeout)
@@ -161,13 +164,13 @@ class ApiRequest:
                 retry -= 1
 
     def delete(
-        self,
-        url: str,
-        data: Dict = None,
-        json: Dict = None,
-        retry: int = 3,
-        stream: bool = False,
-        **kwargs: Any
+            self,
+            url: str,
+            data: Dict = None,
+            json: Dict = None,
+            retry: int = 3,
+            stream: bool = False,
+            **kwargs: Any
     ) -> Union[httpx.Response, None]:
         url = self._parse_url(url)
         kwargs.setdefault("timeout", self.timeout)
@@ -184,13 +187,13 @@ class ApiRequest:
                 retry -= 1
 
     async def adelete(
-        self,
-        url: str,
-        data: Dict = None,
-        json: Dict = None,
-        retry: int = 3,
-        stream: bool = False,
-        **kwargs: Any
+            self,
+            url: str,
+            data: Dict = None,
+            json: Dict = None,
+            retry: int = 3,
+            stream: bool = False,
+            **kwargs: Any
     ) -> Union[httpx.Response, None]:
         url = self._parse_url(url)
         kwargs.setdefault("timeout", self.timeout)
@@ -207,7 +210,7 @@ class ApiRequest:
                                 exc_info=e if log_verbose else None)
                 retry -= 1
 
-    def _fastapi_stream2generator(self, response: StreamingResponse, as_json: bool =False):
+    def _fastapi_stream2generator(self, response: StreamingResponse, as_json: bool = False):
         '''
         将api.py中视图函数返回的StreamingResponse转化为同步生成器
         '''
@@ -217,7 +220,7 @@ class ApiRequest:
             loop = asyncio.new_event_loop()
 
         try:
-            for chunk in  iter_over_async(response.body_iterator, loop):
+            for chunk in iter_over_async(response.body_iterator, loop):
                 if as_json and chunk:
                     yield json.loads(chunk)
                 elif chunk.strip():
@@ -228,9 +231,9 @@ class ApiRequest:
                          exc_info=e if log_verbose else None)
 
     def _httpx_stream2generator(
-        self,
-        response: contextlib._GeneratorContextManager,
-        as_json: bool = False,
+            self,
+            response: contextlib._GeneratorContextManager,
+            as_json: bool = False,
     ):
         '''
         将httpx.stream返回的GeneratorContextManager转化为普通生成器
@@ -238,7 +241,7 @@ class ApiRequest:
         try:
             with response as r:
                 for chunk in r.iter_text(None):
-                    if not chunk: # fastchat api yield empty bytes on start and end
+                    if not chunk:  # fastchat api yield empty bytes on start and end
                         continue
                     if as_json:
                         try:
@@ -391,6 +394,7 @@ class ApiRequest:
         temperature: float = TEMPERATURE,
         prompt_name: str = "knowledge_base_chat",
         no_remote_api: bool = None,
+        isUseESQuery: bool = False,
     ):
         '''
         对应api.py/chat/knowledge_base_chat接口
@@ -413,6 +417,31 @@ class ApiRequest:
 
         print(f"received input message:")
         pprint(data)
+
+        if isUseESQuery:
+            current_path = os.path.abspath(__file__)
+            current_dir = os.path.dirname(current_path)
+            root_dir = os.path.dirname(current_dir)
+            temp_dir = os.path.join(root_dir, "temp")
+            for doc in search(query):
+                filepath = os.path.join(temp_dir, doc['name'] + ".txt")
+                with open(filepath, 'w') as file:
+                    file.write(doc['content'])
+                with open(filepath, 'r') as file:
+                    upFileData = {
+                        "file": file,
+                        "knowledge_base_name": knowledge_base_name
+                    }
+                    if no_remote_api:
+                        from server.knowledge_base.kb_doc_api import upload_doc
+                        upload_doc(**upFileData)
+                    else:
+                        self.post(
+                            "/knowledge_base/upload_doc",
+                            json=upFileData,
+                            stream=False,
+                        )
+                    print(f"{filepath}添加完成")
 
         if no_remote_api:
             from server.chat.knowledge_base_chat import knowledge_base_chat
@@ -476,7 +505,7 @@ class ApiRequest:
             self,
             response: httpx.Response,
             errorMsg: str = f"无法连接API服务器，请确认已执行python server\\api.py",
-        ) -> Dict:
+    ) -> Dict:
         '''
         check whether httpx returns correct data with normal Response.
         error in api with streaming support was checked in _httpx_stream2enerator
@@ -490,8 +519,8 @@ class ApiRequest:
             return {"code": 500, "msg": msg}
 
     def list_knowledge_bases(
-        self,
-        no_remote_api: bool = None,
+            self,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/list_knowledge_bases接口
@@ -509,11 +538,11 @@ class ApiRequest:
             return data.get("data", [])
 
     def create_knowledge_base(
-        self,
-        knowledge_base_name: str,
-        vector_store_type: str = "faiss",
-        embed_model: str = EMBEDDING_MODEL,
-        no_remote_api: bool = None,
+            self,
+            knowledge_base_name: str,
+            vector_store_type: str = "faiss",
+            embed_model: str = EMBEDDING_MODEL,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/create_knowledge_base接口
@@ -539,9 +568,9 @@ class ApiRequest:
             return self._check_httpx_json_response(response)
 
     def delete_knowledge_base(
-        self,
-        knowledge_base_name: str,
-        no_remote_api: bool = None,
+            self,
+            knowledge_base_name: str,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/delete_knowledge_base接口
@@ -561,9 +590,9 @@ class ApiRequest:
             return self._check_httpx_json_response(response)
 
     def list_kb_docs(
-        self,
-        knowledge_base_name: str,
-        no_remote_api: bool = None,
+            self,
+            knowledge_base_name: str,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/list_files接口
@@ -679,6 +708,7 @@ class ApiRequest:
                 files=[("files", (filename, file)) for filename, file in files],
             )
             return self._check_httpx_json_response(response)
+
 
     def delete_kb_docs(
         self,
@@ -934,9 +964,9 @@ def check_success_msg(data: Union[str, dict, list], key: str = "msg") -> str:
     return error message if error occured when requests API
     '''
     if (isinstance(data, dict)
-        and key in data
-        and "code" in data
-        and data["code"] == 200):
+            and key in data
+            and "code" in data
+            and data["code"] == 200):
         return data[key]
     return ""
 

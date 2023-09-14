@@ -122,7 +122,7 @@ def dialogue_page(api: ApiRequest):
 
                 ## Bge 模型会超过1
                 score_threshold = st.slider("知识匹配分数阈值：", 0.0, 1.0, float(SCORE_THRESHOLD), 0.01)
-
+                isUseESQuery = st.checkbox('是否确认选择wiki文档参考')
                 # chunk_content = st.checkbox("关联上下文", False, disabled=True)
                 # chunk_size = st.slider("关联长度：", 0, 500, 250, disabled=True)
         elif dialogue_mode == "搜索引擎问答":
@@ -193,7 +193,8 @@ def dialogue_page(api: ApiRequest):
                                              score_threshold=score_threshold,
                                              history=history,
                                              model=llm_model,
-                                             temperature=temperature):
+                                             temperature=temperature,
+                                             isUseESQuery=isUseESQuery):
                 if error_msg := check_error_msg(d):  # check whether error occured
                     st.error(error_msg)
                 elif chunk := d.get("answer"):

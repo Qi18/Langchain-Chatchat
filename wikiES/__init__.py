@@ -1,0 +1,1 @@
+from .query_wiki import search
