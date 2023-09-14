@@ -24,7 +24,8 @@ def countAll(es, indexName):
     print(count)
 
 
-def search(indexName: "wiki", query):
+def search(query: str,
+           indexName: str = "wiki"):
     es = Elasticsearch([{'host': '127.0.0.1', 'port': 9200}])
     # 分词query
     # analysis = es.indices.analyze(index=indexName, body={"text": query, "analyzer": "ik_max_word"}, )
@@ -72,7 +73,7 @@ def search(indexName: "wiki", query):
                 "should": boolList
             }
         },
-        "size": 10,  # 返回前5个最相似的文档，可以根据需要调整
+        "size": 20,  # 返回前5个最相似的文档，可以根据需要调整
         # "_source": ["your_field_name"]  # 返回的字段，可以根据需要调整
     }
     response = es.search(index=indexName, body=query_body)
@@ -96,7 +97,7 @@ def search(indexName: "wiki", query):
                         }]
                     }
                 },
-                "size": 2,  # 返回前5个最相似的文档，可以根据需要调整
+                "size": 4,  # 返回前5个最相似的文档，可以根据需要调整
                 # "_source": ["your_field_name"]  # 返回的字段，可以根据需要调整
             }
             response = es.search(index=indexName, body=query_body)

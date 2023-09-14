@@ -1,6 +1,7 @@
  # 该文件包含webui通用工具，可以被不同的webui使用
 from typing import *
 from pathlib import Path
+from fastapi import UploadFile
 from configs import (
     EMBEDDING_MODEL,
     DEFAULT_VS_TYPE,
@@ -425,23 +426,24 @@ class ApiRequest:
             temp_dir = os.path.join(root_dir, "temp")
             for doc in search(query):
                 filepath = os.path.join(temp_dir, doc['name'] + ".txt")
-                with open(filepath, 'w') as file:
+                with open(filepath, 'w', encoding="utf-8") as file:
                     file.write(doc['content'])
-                with open(filepath, 'r') as file:
-                    upFileData = {
-                        "file": file,
-                        "knowledge_base_name": knowledge_base_name
-                    }
+                with open(filepath, 'rb') as file:
                     if no_remote_api:
+                        file_content = file.read()
+                        file_stream = BytesIO(file_content)
+                        upload_file = UploadFile(filename=doc['name'] + ".txt", file=file_stream)
                         from server.knowledge_base.kb_doc_api import upload_doc
-                        upload_doc(**upFileData)
+                        print(1)
+                        upload_doc(upload_file, knowledge_base_name)
                     else:
-                        self.post(
-                            "/knowledge_base/upload_doc",
-                            json=upFileData,
-                            stream=False,
-                        )
-                    print(f"{filepath}添加完成")
+                        print(2)
+                        files = {'file': (doc['name'] + ".txt", file, 'text/plain')}
+                        upfiledata = {"knowledge_base_name": knowledge_base_name}
+                        url = self._parse_url("/knowledge_base/upload_doc")
+                        response = httpx.post(url, files=files, data=upfiledata)
+                print(f"{filepath}添加完成")
+                os.remove(filepath)
 
         if no_remote_api:
             from server.chat.knowledge_base_chat import knowledge_base_chat
