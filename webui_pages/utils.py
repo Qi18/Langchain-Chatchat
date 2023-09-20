@@ -34,9 +34,9 @@ import nltk
 
 nltk.data.path = [NLTK_DATA_PATH] + nltk.data.path
 from pprint import pprint
-from wikiES.query_wiki import search
+from wikiES.query_wiki import searchRelatedContent
 import os
-
+import asyncio
 KB_ROOT_PATH = Path(KB_ROOT_PATH)
 set_httpx_config()
 
@@ -424,20 +424,23 @@ class ApiRequest:
             current_dir = os.path.dirname(current_path)
             root_dir = os.path.dirname(current_dir)
             temp_dir = os.path.join(root_dir, "temp")
-            for doc in search(query):
+            if no_remote_api:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            for doc in searchRelatedContent(query):
                 filepath = os.path.join(temp_dir, doc['name'] + ".txt")
                 with open(filepath, 'w', encoding="utf-8") as file:
                     file.write(doc['content'])
                 with open(filepath, 'rb') as file:
+                    # no_remote_api = True
                     if no_remote_api:
                         file_content = file.read()
                         file_stream = BytesIO(file_content)
                         upload_file = UploadFile(filename=doc['name'] + ".txt", file=file_stream)
                         from server.knowledge_base.kb_doc_api import upload_doc
-                        print(1)
-                        upload_doc(upload_file, knowledge_base_name)
+                        loop.run_until_complete(upload_doc(upload_file, knowledge_base_name))
+                        # asyncio.run(upload_doc(upload_file, knowledge_base_name))
                     else:
-                        print(2)
                         files = {'file': (doc['name'] + ".txt", file, 'text/plain')}
                         upfiledata = {"knowledge_base_name": knowledge_base_name}
                         url = self._parse_url("/knowledge_base/upload_doc")
@@ -488,7 +491,6 @@ class ApiRequest:
 
         print(f"received input message:")
         pprint(data)
-
         if no_remote_api:
             from server.chat.search_engine_chat import search_engine_chat
             response = run_async(search_engine_chat(**data))

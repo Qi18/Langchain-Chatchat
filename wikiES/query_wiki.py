@@ -24,7 +24,7 @@ def countAll(es, indexName):
     print(count)
 
 
-def search(query: str,
+def searchRelatedContent(query: str,
            indexName: str = "wiki"):
     es = Elasticsearch([{'host': '127.0.0.1', 'port': 9200}])
     # 分词query
