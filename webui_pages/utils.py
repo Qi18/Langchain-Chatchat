@@ -419,16 +419,15 @@ class ApiRequest:
         print(f"received input message:")
         pprint(data)
 
+        print(isUseESQuery)
         if isUseESQuery:
             current_path = os.path.abspath(__file__)
             current_dir = os.path.dirname(current_path)
             root_dir = os.path.dirname(current_dir)
             temp_dir = os.path.join(root_dir, "temp")
-            if no_remote_api:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
             for doc in searchRelatedContent(query):
                 filepath = os.path.join(temp_dir, doc['name'] + ".txt")
+                print(doc['content'])
                 with open(filepath, 'w', encoding="utf-8") as file:
                     file.write(doc['content'])
                 with open(filepath, 'rb') as file:
@@ -437,11 +436,15 @@ class ApiRequest:
                         file_content = file.read()
                         file_stream = BytesIO(file_content)
                         upload_file = UploadFile(filename=doc['name'] + ".txt", file=file_stream)
-                        from server.knowledge_base.kb_doc_api import upload_doc
-                        loop.run_until_complete(upload_doc(upload_file, knowledge_base_name))
+                        from server.knowledge_base.kb_doc_api import upload_docs
+                        upload_docs([upload_file], knowledge_base_name)
                         # asyncio.run(upload_doc(upload_file, knowledge_base_name))
                     else:
+<<<<<<< HEAD
                         files = {'file': (doc['name'] + ".txt", file, 'text/plain')}
+=======
+                        files = {'files': (doc['name'] + ".txt", file, 'text/plain')}
+>>>>>>> 2fdf186 (fix:一些错位的修改)
                         upfiledata = {"knowledge_base_name": knowledge_base_name}
                         url = self._parse_url("/knowledge_base/upload_doc")
                         response = httpx.post(url, files=files, data=upfiledata)

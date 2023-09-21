@@ -1,1 +1,1 @@
-from .query_wiki import search
+from .query_wiki import *

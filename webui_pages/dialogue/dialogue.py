@@ -87,11 +87,18 @@ def dialogue_page(api: ApiRequest):
                                  index,
                                  format_func=llm_model_format_func,
                                  on_change=on_llm_change,
+<<<<<<< HEAD
                                  key="llm_model",
                                  )
         if (st.session_state.get("prev_llm_model") != llm_model
                 and not get_model_worker_config(llm_model).get("online_api")
                 and llm_model not in running_models):
+=======
+                                 # key="llm_model",
+                                 )
+        if (st.session_state.get("prev_llm_model") != llm_model
+                and not get_model_worker_config(llm_model).get("online_api")):
+>>>>>>> 2fdf186 (fix:一些错位的修改)
             with st.spinner(f"正在加载模型： {llm_model}，请勿进行操作或刷新页面"):
                 prev_model = st.session_state.get("prev_llm_model")
                 r = api.change_llm_model(prev_model, llm_model)
@@ -193,8 +200,13 @@ def dialogue_page(api: ApiRequest):
                                              score_threshold=score_threshold,
                                              history=history,
                                              model=llm_model,
+<<<<<<< HEAD
                                              temperature=temperature,
                                              isUseESQuery=isUseESQuery):
+=======
+                                             isUseESQuery=isUseESQuery,
+                                             temperature=temperature):
+>>>>>>> 2fdf186 (fix:一些错位的修改)
                 if error_msg := check_error_msg(d):  # check whether error occured
                     st.error(error_msg)
                 elif chunk := d.get("answer"):
