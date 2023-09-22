@@ -26,7 +26,7 @@ def countAll(es, indexName):
 
 def searchRelatedContent(query: str,
            indexName: str = "wiki"):
-    es = Elasticsearch([{'host': '127.0.0.1', 'port': 9200}])
+    es = Elasticsearch([{'host': '0.0.0.0', 'port': 9200}])
     # 分词query
     # analysis = es.indices.analyze(index=indexName, body={"text": query, "analyzer": "ik_max_word"}, )
     # tokens = [token['token'] for token in analysis['tokens']]
@@ -47,8 +47,11 @@ def searchRelatedContent(query: str,
     #     if token not in stopwords and len(token) > 1:
     #         realTokens.append(token)
     realTokens = tokens
+    print("分析query的出来需要查询的词汇是：")
     print(realTokens)
     ans = []
+    if len(realTokens) == 0:
+        return ans
     # 构造query
     boolList = []
     for token in realTokens:

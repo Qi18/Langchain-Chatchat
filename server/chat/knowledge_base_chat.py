@@ -65,15 +65,15 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
 
         chat_prompt = ChatPromptTemplate.from_messages(
             [i.to_msg_template() for i in history] + [input_msg])
-        messages = chat_prompt.format_prompt(
-            context="Bob",
-            question="What is your name?"
-        )
-        print("messages:")
-        print(messages.to_string())
-        print(ChatPromptTemplate.from_messages([History(role="user", content=PROMPT_TEMPLATE).to_msg_template(False)]).format_prompt(
-            context="Bob",
-            question="What is your name?").to_string())
+        # messages = chat_prompt.format_prompt(
+        #     context="Bob",
+        #     question="What is your name?"
+        # )
+        # print("messages:")
+        # print(messages.to_string())
+        # print(ChatPromptTemplate.from_messages([History(role="user", content=PROMPT_TEMPLATE).to_msg_template(False)]).format_prompt(
+        #     context="Bob",
+        #     question="What is your name?").to_string())
 
 
         chain = LLMChain(prompt=chat_prompt, llm=model)

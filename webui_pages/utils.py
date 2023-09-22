@@ -37,6 +37,7 @@ from pprint import pprint
 from wikiES.query_wiki import searchRelatedContent
 import os
 import asyncio
+
 KB_ROOT_PATH = Path(KB_ROOT_PATH)
 set_httpx_config()
 
@@ -49,10 +50,10 @@ class ApiRequest:
     '''
 
     def __init__(
-        self,
-        base_url: str = api_address(),
-        timeout: float = HTTPX_DEFAULT_TIMEOUT,
-        no_remote_api: bool = False,   # call api view function directly
+            self,
+            base_url: str = api_address(),
+            timeout: float = HTTPX_DEFAULT_TIMEOUT,
+            no_remote_api: bool = False,  # call api view function directly
     ):
         self.base_url = base_url
         self.timeout = timeout
@@ -274,14 +275,14 @@ class ApiRequest:
     # 对话相关操作
 
     def chat_fastchat(
-        self,
-        messages: List[Dict],
-        stream: bool = True,
-        model: str = LLM_MODEL,
-        temperature: float = TEMPERATURE,
-        max_tokens: int = 1024, # todo:根据message内容自动计算max_tokens
-        no_remote_api: bool = None,
-        **kwargs: Any,
+            self,
+            messages: List[Dict],
+            stream: bool = True,
+            model: str = LLM_MODEL,
+            temperature: float = TEMPERATURE,
+            max_tokens: int = 1024,  # todo:根据message内容自动计算max_tokens
+            no_remote_api: bool = None,
+            **kwargs: Any,
     ):
         '''
         对应api.py/chat/fastchat接口
@@ -419,13 +420,21 @@ class ApiRequest:
         print(f"received input message:")
         pprint(data)
 
-        print(isUseESQuery)
         if isUseESQuery:
+            if no_remote_api:
+                from server.knowledge_base.kb_doc_api import list_files
+                fileList = list_files(knowledge_base_name)
+                hasFiles = set(fileList.data)
+            else:
+                fileList = self.get("/knowledge_base/list_files", params={"knowledge_base_name": knowledge_base_name}, )
+                hasFiles = set(fileList.json()['data'])
             current_path = os.path.abspath(__file__)
             current_dir = os.path.dirname(current_path)
             root_dir = os.path.dirname(current_dir)
             temp_dir = os.path.join(root_dir, "temp")
             for doc in searchRelatedContent(query):
+                if str(doc['name'] + ".txt") in hasFiles:
+                    continue
                 filepath = os.path.join(temp_dir, doc['name'] + ".txt")
                 print(doc['content'])
                 with open(filepath, 'w', encoding="utf-8") as file:
@@ -437,14 +446,10 @@ class ApiRequest:
                         file_stream = BytesIO(file_content)
                         upload_file = UploadFile(filename=doc['name'] + ".txt", file=file_stream)
                         from server.knowledge_base.kb_doc_api import upload_docs
-                        upload_docs([upload_file], knowledge_base_name)
+                        upload_docs([upload_file], knowledge_base_name, docs={})
                         # asyncio.run(upload_doc(upload_file, knowledge_base_name))
                     else:
-<<<<<<< HEAD
-                        files = {'file': (doc['name'] + ".txt", file, 'text/plain')}
-=======
                         files = {'files': (doc['name'] + ".txt", file, 'text/plain')}
->>>>>>> 2fdf186 (fix:一些错位的修改)
                         upfiledata = {"knowledge_base_name": knowledge_base_name}
                         url = self._parse_url("/knowledge_base/upload_doc")
                         response = httpx.post(url, files=files, data=upfiledata)
@@ -620,12 +625,12 @@ class ApiRequest:
             return data.get("data", [])
 
     def search_kb_docs(
-        self,
-        query: str,
-        knowledge_base_name: str,
-        top_k: int = VECTOR_SEARCH_TOP_K,
-        score_threshold: int = SCORE_THRESHOLD,
-        no_remote_api: bool = None,
+            self,
+            query: str,
+            knowledge_base_name: str,
+            top_k: int = VECTOR_SEARCH_TOP_K,
+            score_threshold: int = SCORE_THRESHOLD,
+            no_remote_api: bool = None,
     ) -> List:
         '''
         对应api.py/knowledge_base/search_docs接口
@@ -652,17 +657,17 @@ class ApiRequest:
             return data
 
     def upload_kb_docs(
-        self,
-        files: List[Union[str, Path, bytes]],
-        knowledge_base_name: str,
-        override: bool = False,
-        to_vector_store: bool = True,
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=OVERLAP_SIZE,
-        zh_title_enhance=ZH_TITLE_ENHANCE,
-        docs: Dict = {},
-        not_refresh_vs_cache: bool = False,
-        no_remote_api: bool = None,
+            self,
+            files: List[Union[str, Path, bytes]],
+            knowledge_base_name: str,
+            override: bool = False,
+            to_vector_store: bool = True,
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=OVERLAP_SIZE,
+            zh_title_enhance=ZH_TITLE_ENHANCE,
+            docs: Dict = {},
+            not_refresh_vs_cache: bool = False,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/upload_docs接口
@@ -671,17 +676,17 @@ class ApiRequest:
             no_remote_api = self.no_remote_api
 
         def convert_file(file, filename=None):
-            if isinstance(file, bytes): # raw bytes
+            if isinstance(file, bytes):  # raw bytes
                 file = BytesIO(file)
-            elif hasattr(file, "read"): # a file io like object
+            elif hasattr(file, "read"):  # a file io like object
                 filename = filename or file.name
-            else: # a local path
+            else:  # a local path
                 file = Path(file).absolute().open("rb")
                 filename = filename or os.path.split(file.name)[-1]
             return filename, file
 
         files = [convert_file(file) for file in files]
-        data={
+        data = {
             "knowledge_base_name": knowledge_base_name,
             "override": override,
             "to_vector_store": to_vector_store,
@@ -715,15 +720,13 @@ class ApiRequest:
                 files=[("files", (filename, file)) for filename, file in files],
             )
             return self._check_httpx_json_response(response)
-
-
     def delete_kb_docs(
-        self,
-        knowledge_base_name: str,
-        file_names: List[str],
-        delete_content: bool = False,
-        not_refresh_vs_cache: bool = False,
-        no_remote_api: bool = None,
+            self,
+            knowledge_base_name: str,
+            file_names: List[str],
+            delete_content: bool = False,
+            not_refresh_vs_cache: bool = False,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/delete_docs接口
@@ -750,16 +753,16 @@ class ApiRequest:
             return self._check_httpx_json_response(response)
 
     def update_kb_docs(
-        self,
-        knowledge_base_name: str,
-        file_names: List[str],
-        override_custom_docs: bool = False,
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=OVERLAP_SIZE,
-        zh_title_enhance=ZH_TITLE_ENHANCE,
-        docs: Dict = {},
-        not_refresh_vs_cache: bool = False,
-        no_remote_api: bool = None,
+            self,
+            knowledge_base_name: str,
+            file_names: List[str],
+            override_custom_docs: bool = False,
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=OVERLAP_SIZE,
+            zh_title_enhance=ZH_TITLE_ENHANCE,
+            docs: Dict = {},
+            not_refresh_vs_cache: bool = False,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/update_docs接口
@@ -791,15 +794,15 @@ class ApiRequest:
             return self._check_httpx_json_response(response)
 
     def recreate_vector_store(
-        self,
-        knowledge_base_name: str,
-        allow_empty_kb: bool = True,
-        vs_type: str = DEFAULT_VS_TYPE,
-        embed_model: str = EMBEDDING_MODEL,
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=OVERLAP_SIZE,
-        zh_title_enhance=ZH_TITLE_ENHANCE,
-        no_remote_api: bool = None,
+            self,
+            knowledge_base_name: str,
+            allow_empty_kb: bool = True,
+            vs_type: str = DEFAULT_VS_TYPE,
+            embed_model: str = EMBEDDING_MODEL,
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=OVERLAP_SIZE,
+            zh_title_enhance=ZH_TITLE_ENHANCE,
+            no_remote_api: bool = None,
     ):
         '''
         对应api.py/knowledge_base/recreate_vector_store接口
@@ -832,9 +835,9 @@ class ApiRequest:
 
     # LLM模型相关操作
     def list_running_models(
-        self,
-        controller_address: str = None,
-        no_remote_api: bool = None,
+            self,
+            controller_address: str = None,
+            no_remote_api: bool = None,
     ):
         '''
         获取Fastchat中正运行的模型列表
@@ -873,10 +876,10 @@ class ApiRequest:
             return r.json().get("data", {})
 
     def stop_llm_model(
-        self,
-        model_name: str,
-        controller_address: str = None,
-        no_remote_api: bool = None,
+            self,
+            model_name: str,
+            controller_address: str = None,
+            no_remote_api: bool = None,
     ):
         '''
         停止某个LLM模型。
@@ -901,11 +904,11 @@ class ApiRequest:
             return r.json()
 
     def change_llm_model(
-        self,
-        model_name: str,
-        new_model_name: str,
-        controller_address: str = None,
-        no_remote_api: bool = None,
+            self,
+            model_name: str,
+            new_model_name: str,
+            controller_address: str = None,
+            no_remote_api: bool = None,
     ):
         '''
         向fastchat controller请求切换LLM模型。
@@ -949,7 +952,7 @@ class ApiRequest:
             r = self.post(
                 "/llm_model/change",
                 json=data,
-                timeout=HTTPX_DEFAULT_TIMEOUT, # wait for new worker_model
+                timeout=HTTPX_DEFAULT_TIMEOUT,  # wait for new worker_model
             )
             return r.json()
 
