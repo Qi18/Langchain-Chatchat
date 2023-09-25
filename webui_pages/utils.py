@@ -384,6 +384,48 @@ class ApiRequest:
             response = self.post("/chat/agent_chat", json=data, stream=True)
             return self._httpx_stream2generator(response)
 
+
+    def knowledge_wiki_upload(
+            self,
+            query: str,
+            knowledge_base_name: str,
+            no_remote_api: bool = None,
+    ):
+        if no_remote_api:
+            from server.knowledge_base.kb_doc_api import list_files
+            fileList = list_files(knowledge_base_name)
+            hasFiles = set(fileList.data)
+        else:
+            fileList = self.get("/knowledge_base/list_files", params={"knowledge_base_name": knowledge_base_name}, )
+            hasFiles = set(fileList.json()['data'])
+        current_path = os.path.abspath(__file__)
+        current_dir = os.path.dirname(current_path)
+        root_dir = os.path.dirname(current_dir)
+        temp_dir = os.path.join(root_dir, "temp")
+        for doc in searchRelatedContent(query):
+            if str(doc['name'] + ".txt") in hasFiles:
+                continue
+            filepath = os.path.join(temp_dir, doc['name'] + ".txt")
+            print(doc['content'])
+            with open(filepath, 'w', encoding="utf-8") as file:
+                file.write(doc['content'])
+            with open(filepath, 'rb') as file:
+                # no_remote_api = True
+                if no_remote_api:
+                    file_content = file.read()
+                    file_stream = BytesIO(file_content)
+                    upload_file = UploadFile(filename=doc['name'] + ".txt", file=file_stream)
+                    from server.knowledge_base.kb_doc_api import upload_docs
+                    upload_docs([upload_file], knowledge_base_name, docs={})
+                    # asyncio.run(upload_doc(upload_file, knowledge_base_name))
+                else:
+                    files = {'files': (doc['name'] + ".txt", file, 'text/plain')}
+                    upfiledata = {"knowledge_base_name": knowledge_base_name}
+                    url = self._parse_url("/knowledge_base/upload_docs")
+                    response = httpx.post(url, files=files, data=upfiledata)
+            print(f"{filepath}添加完成")
+            os.remove(filepath)
+
     def knowledge_base_chat(
         self,
         query: str,
@@ -396,7 +438,7 @@ class ApiRequest:
         temperature: float = TEMPERATURE,
         prompt_name: str = "knowledge_base_chat",
         no_remote_api: bool = None,
-        isUseESQuery: bool = False,
+        is_use_esQuery: bool = False,
     ):
         '''
         对应api.py/chat/knowledge_base_chat接口
@@ -420,7 +462,7 @@ class ApiRequest:
         print(f"received input message:")
         pprint(data)
 
-        if isUseESQuery:
+        if is_use_esQuery:
             if no_remote_api:
                 from server.knowledge_base.kb_doc_api import list_files
                 fileList = list_files(knowledge_base_name)

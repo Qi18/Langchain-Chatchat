@@ -87,18 +87,11 @@ def dialogue_page(api: ApiRequest):
                                  index,
                                  format_func=llm_model_format_func,
                                  on_change=on_llm_change,
-<<<<<<< HEAD
                                  key="llm_model",
                                  )
         if (st.session_state.get("prev_llm_model") != llm_model
                 and not get_model_worker_config(llm_model).get("online_api")
                 and llm_model not in running_models):
-=======
-                                 # key="llm_model",
-                                 )
-        if (st.session_state.get("prev_llm_model") != llm_model
-                and not get_model_worker_config(llm_model).get("online_api")):
->>>>>>> 2fdf186 (fix:一些错位的修改)
             with st.spinner(f"正在加载模型： {llm_model}，请勿进行操作或刷新页面"):
                 prev_model = st.session_state.get("prev_llm_model")
                 r = api.change_llm_model(prev_model, llm_model)
@@ -194,19 +187,20 @@ def dialogue_page(api: ApiRequest):
                 Markdown("...", in_expander=True, title="知识库匹配结果", state="complete"),
             ])
             text = ""
+            if isUseESQuery:
+                # chat_box.ai_say([
+                #     f"正在查询wiki知识库 ...",
+                #     Markdown("...", in_expander=True, title="知识库匹配结果"),
+                # ])
+                api.knowledge_wiki_upload(query=prompt, knowledge_base_name=selected_kb)
             for d in api.knowledge_base_chat(prompt,
                                              knowledge_base_name=selected_kb,
                                              top_k=kb_top_k,
                                              score_threshold=score_threshold,
                                              history=history,
                                              model=llm_model,
-<<<<<<< HEAD
                                              temperature=temperature,
-                                             isUseESQuery=isUseESQuery):
-=======
-                                             isUseESQuery=isUseESQuery,
-                                             temperature=temperature):
->>>>>>> 2fdf186 (fix:一些错位的修改)
+                                             is_use_esQuery=isUseESQuery):
                 if error_msg := check_error_msg(d):  # check whether error occured
                     st.error(error_msg)
                 elif chunk := d.get("answer"):
