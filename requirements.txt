@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 langchain>=0.0.302
+=======
+langchain==0.0.287
+>>>>>>> e8dcbb5 (es)
 fschat[model_worker]==0.2.29
 openai
 sentence_transformers
@@ -54,7 +58,7 @@ einops
 scipy
 transformers_stream_generator==0.0.4
 
-
 elasticsearch==7.9.1
 jieba==0.42.1
+xformers
 

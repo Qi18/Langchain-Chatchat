@@ -1,6 +1,7 @@
 from elasticsearch import Elasticsearch, helpers, exceptions
 import os
 import jieba.posseg as pseg
+from configs.server_config import DEFAULT_BIND_HOST
 
 
 def delIndex(es, indexName):
@@ -26,7 +27,7 @@ def countAll(es, indexName):
 
 def searchRelatedContent(query: str,
            indexName: str = "wiki"):
-    es = Elasticsearch([{'host': '0.0.0.0', 'port': 9200}])
+    es = Elasticsearch([{'host': DEFAULT_BIND_HOST, 'port': 9200}])
     # 分词query
     # analysis = es.indices.analyze(index=indexName, body={"text": query, "analyzer": "ik_max_word"}, )
     # tokens = [token['token'] for token in analysis['tokens']]
@@ -54,13 +55,23 @@ def searchRelatedContent(query: str,
         return ans
     # 构造query
     boolList = []
+    # 联合查询
     for token in realTokens:
         boolList.append(
             {
                 "match": {
-                    "title": {
+                    "name.keyword": {
                         "query": token,
-                        "boost": 10
+                        "boost": 5
+                    }
+                }
+            })
+        boolList.append(
+            {
+                "match": {
+                    "name": {
+                        "query": token,
+                        "boost": 3
                     }
                 }
             })
@@ -81,6 +92,8 @@ def searchRelatedContent(query: str,
     }
     response = es.search(index=indexName, body=query_body)
     for res in response['hits']['hits']:
+        if len(res['_source']['content']) < 5:
+            continue
         ans.append({"name": res['_source']['name'], "score": res['_score'], "content": res['_source']['content']})
     if len(realTokens) > 1:
         for token in realTokens:
@@ -89,11 +102,17 @@ def searchRelatedContent(query: str,
                     "bool": {
                         "should": [{
                             "match": {
-                                "title": {
+                                "name.keyword": {
                                     "query": token,
-                                    "boost": 10
+                                    "boost": 5
                                 }
                             }}, {
+                            "match": {
+                                "name": {
+                                    "query": token,
+                                    "boost": 3
+                                }
+                            }},{
                             "match": {
                                 "content": token
                             }
@@ -105,6 +124,8 @@ def searchRelatedContent(query: str,
             }
             response = es.search(index=indexName, body=query_body)
             for res in response['hits']['hits']:
+                if len(res['_source']['content']) < 5:
+                    continue
                 ans.append(
                     {"name": res['_source']['name'], "score": res['_score'], "content": res['_source']['content']})
     return ans
