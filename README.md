@@ -1,3 +1,4 @@
+
 ![](img/logo-long-chatchat-trans-v2.png)
 
 [![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white "langchain-chatglm")](https://t.me/+RjliQ3jnJ1YyN2E9)
@@ -497,5 +498,4 @@ CUDA_VISIBLE_DEVICES=0,1 python startup.py -a
 ![](img/official_wechat_mp_account.png)
 
 🎉 langchain-Chatchat 项目官方公众号，欢迎扫码关注。
-
 

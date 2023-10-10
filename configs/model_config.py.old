@@ -22,7 +22,11 @@ embedding_model_dict = {
     "text2vec-multilingual": "shibing624/text2vec-base-multilingual",
     "text2vec-bge-large-chinese": "shibing624/text2vec-bge-large-chinese",
     "m3e-small": "moka-ai/m3e-small",
+<<<<<<< HEAD:configs/model_config.py.old
     "m3e-base": "/data/lrq/llm/llm_data/text/m3e-base",
+=======
+    "m3e-base": "moka-ai/m3e-base",
+>>>>>>> 61dbc0c (fix:调整结构):configs/model_config.py.example
     "m3e-large": "moka-ai/m3e-large",
     "bge-small-zh": "BAAI/bge-small-zh",
     "bge-base-zh": "BAAI/bge-base-zh",
@@ -41,13 +45,21 @@ EMBEDDING_DEVICE = "auto"
 
 llm_model_dict = {
     "chatglm-6b": {
+<<<<<<< HEAD:configs/model_config.py.old
         "local_model_path": "/data/lrq/llm/llm_data/models/chatglm-6b",
+=======
+        "local_model_path": "THUDM/chatglm-6b",
+>>>>>>> 61dbc0c (fix:调整结构):configs/model_config.py.example
         "api_base_url": "http://localhost:8888/v1",  # "name"修改为fastchat服务中的"api_base_url"
         "api_key": "EMPTY"
     },
 
     "chatglm2-6b": {
+<<<<<<< HEAD:configs/model_config.py.old
         "local_model_path": "/data/lrq/llm/llm_data/models/chatglm2-6b",
+=======
+        "local_model_path": "THUDM/chatglm2-6b",
+>>>>>>> 61dbc0c (fix:调整结构):configs/model_config.py.example
         "api_base_url": "http://localhost:8888/v1",  # URL需要与运行fastchat服务端的server_config.FSCHAT_OPENAI_API一致
         "api_key": "EMPTY"
     },
@@ -58,6 +70,7 @@ llm_model_dict = {
         "api_key": "EMPTY"
     },
 
+<<<<<<< HEAD:configs/model_config.py.old
     "baichuan2-7B-Chat": {
         "local_model_path": "/data/lrq/llm/llm_data/models/baichuan2-7B-Chat",  # "THUDM/chatglm2-6b-32k",
         "api_base_url": "http://localhost:8888/v1",  # "URL需要与运行fastchat服务端的server_config.FSCHAT_OPENAI_API一致
@@ -71,6 +84,8 @@ llm_model_dict = {
     },
 
 
+=======
+>>>>>>> 61dbc0c (fix:调整结构):configs/model_config.py.example
     # 调用chatgpt时如果报出： urllib3.exceptions.MaxRetryError: HTTPSConnectionPool(host='api.openai.com', port=443):
     #  Max retries exceeded with url: /v1/chat/completions
     # 则需要将urllib3版本修改为1.25.11
@@ -128,9 +143,13 @@ llm_model_dict = {
 }
 
 # LLM 名称
+<<<<<<< HEAD:configs/model_config.py.old
 LLM_MODEL = "baichuan2-7B-Chat"
 # LLM_MODEL = "chatglm2-6b"
 # LLM_MODEL = "baichuan-7B"
+=======
+LLM_MODEL = "chatglm2-6b"
+>>>>>>> 61dbc0c (fix:调整结构):configs/model_config.py.example
 
 # 历史对话轮数
 HISTORY_LEN = 3

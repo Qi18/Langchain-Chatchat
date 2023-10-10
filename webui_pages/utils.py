@@ -1,4 +1,4 @@
- # 该文件包含webui通用工具，可以被不同的webui使用
+# 该文件包含webui通用工具，可以被不同的webui使用
 from typing import *
 from pathlib import Path
 from fastapi import UploadFile
