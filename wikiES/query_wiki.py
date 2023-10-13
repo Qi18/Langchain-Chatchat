@@ -16,7 +16,7 @@ def searchAll(es):
             "match_all": {}
         }
     }
-    response = es.search(index="wiki", body=query)
+    response = es.search(index="baike", body=query)
     print(response)
 
 
@@ -26,7 +26,7 @@ def countAll(es, indexName):
 
 
 def searchRelatedContent(query: str,
-           indexName: str = "wiki"):
+           indexName: str = "baike"):
     es = Elasticsearch([{'host': DEFAULT_BIND_HOST, 'port': 9200}])
     # 分词query
     # analysis = es.indices.analyze(index=indexName, body={"text": query, "analyzer": "ik_max_word"}, )
@@ -87,45 +87,49 @@ def searchRelatedContent(query: str,
                 "should": boolList
             }
         },
-        "size": 20,  # 返回前5个最相似的文档，可以根据需要调整
-        # "_source": ["your_field_name"]  # 返回的字段，可以根据需要调整
+        "size": len(realTokens) * 10,
     }
     response = es.search(index=indexName, body=query_body)
     for res in response['hits']['hits']:
         if len(res['_source']['content']) < 5:
             continue
         ans.append({"name": res['_source']['name'], "score": res['_score'], "content": res['_source']['content']})
-    if len(realTokens) > 1:
-        for token in realTokens:
-            query_body = {
-                "query": {
-                    "bool": {
-                        "should": [{
-                            "match": {
-                                "name.keyword": {
-                                    "query": token,
-                                    "boost": 5
-                                }
-                            }}, {
-                            "match": {
-                                "name": {
-                                    "query": token,
-                                    "boost": 3
-                                }
-                            }},{
-                            "match": {
-                                "content": token
-                            }
-                        }]
-                    }
-                },
-                "size": 4,  # 返回前5个最相似的文档，可以根据需要调整
-                # "_source": ["your_field_name"]  # 返回的字段，可以根据需要调整
-            }
-            response = es.search(index=indexName, body=query_body)
-            for res in response['hits']['hits']:
-                if len(res['_source']['content']) < 5:
-                    continue
-                ans.append(
-                    {"name": res['_source']['name'], "score": res['_score'], "content": res['_source']['content']})
+    # if len(realTokens) > 1:
+    #     for token in realTokens:
+    #         query_body = {
+    #             "query": {
+    #                 "bool": {
+    #                     "should": [{
+    #                         "match": {
+    #                             "name.keyword": {
+    #                                 "query": token,
+    #                                 "boost": 5
+    #                             }
+    #                         }}, {
+    #                         "match": {
+    #                             "name": {
+    #                                 "query": token,
+    #                                 "boost": 3
+    #                             }
+    #                         }},{
+    #                         "match": {
+    #                             "content": token
+    #                         }
+    #                     }]
+    #                 }
+    #             },
+    #             "size": 4,  # 返回前5个最相似的文档，可以根据需要调整
+    #             # "_source": ["your_field_name"]  # 返回的字段，可以根据需要调整
+    #         }
+    #         response = es.search(index=indexName, body=query_body)
+    #         for res in response['hits']['hits']:
+    #             if len(res['_source']['content']) < 5:
+    #                 continue
+    #             ans.append(
+    #                 {"name": res['_source']['name'], "score": res['_score'], "content": res['_source']['content']})
     return ans
+
+if __name__ == "__main__":
+    query = "习近平在2017年干了什么"
+    for i in searchRelatedContent(query):
+        print(i)
