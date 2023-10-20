@@ -1,8 +1,9 @@
-
 from fastapi import Body
 from fastapi.responses import StreamingResponse
+from langchain.chat_models import ChatOpenAI
+
 from configs import LLM_MODEL, TEMPERATURE
-from server.utils import wrap_done, get_ChatOpenAI
+from server.utils import wrap_done, get_ChatOpenAI, fschat_openai_api_address, get_model_worker_config
 from langchain.chains import LLMChain
 from langchain.callbacks import AsyncIteratorCallbackHandler
 from typing import AsyncIterable
@@ -14,18 +15,19 @@ from server.utils import get_prompt_template
 
 
 async def chat(query: str = Body(..., description="用户输入", examples=["恼羞成怒"]),
-                history: List[History] = Body([],
-                                       description="历史对话",
-                                       examples=[[
-                                           {"role": "user", "content": "我们来玩成语接龙，我先来，生龙活虎"},
-                                           {"role": "assistant", "content": "虎头虎脑"}]]
-                                       ),
-                stream: bool = Body(False, description="流式输出"),
-                model_name: str = Body(LLM_MODEL, description="LLM 模型名称。"),
-                temperature: float = Body(TEMPERATURE, description="LLM 采样温度", ge=0.0, le=1.0),
-                # top_p: float = Body(TOP_P, description="LLM 核采样。勿与temperature同时设置", gt=0.0, lt=1.0),
-                prompt_name: str = Body("llm_chat", description="使用的prompt模板名称(在configs/prompt_config.py中配置)"),
-         ):
+               history: List[History] = Body([],
+                                             description="历史对话",
+                                             examples=[[
+                                                 {"role": "user", "content": "我们来玩成语接龙，我先来，生龙活虎"},
+                                                 {"role": "assistant", "content": "虎头虎脑"}]]
+                                             ),
+               stream: bool = Body(False, description="流式输出"),
+               model_name: str = Body(LLM_MODEL, description="LLM 模型名称。"),
+               temperature: float = Body(TEMPERATURE, description="LLM 采样温度", ge=0.0, le=1.0),
+               # top_p: float = Body(TOP_P, description="LLM 核采样。勿与temperature同时设置", gt=0.0, lt=1.0),
+               prompt_name: str = Body("llm_chat",
+                                       description="使用的prompt模板名称(在configs/prompt_config.py中配置)"),
+               ):
     history = [History.from_data(h) for h in history]
 
     async def chat_iterator(query: str,
@@ -69,3 +71,31 @@ async def chat(query: str = Body(..., description="用户输入", examples=["恼
                                            model_name=model_name,
                                            prompt_name=prompt_name),
                              media_type="text/event-stream")
+
+
+def chat_local(query: str,
+                        history: List[History] = [],
+                        model_name: str = LLM_MODEL,
+                        prompt_name: str = "llm_chat",
+                        temperature: float = TEMPERATURE,
+                        ) -> str:
+    history = [History.from_data(h) for h in history]
+    config = get_model_worker_config(model_name)
+    model = ChatOpenAI(
+        verbose=False,
+        openai_api_key=config.get("api_key", "EMPTY"),
+        openai_api_base=config.get("api_base_url", fschat_openai_api_address()),
+        model_name=model_name,
+        temperature=temperature,
+        openai_proxy=config.get("openai_proxy")
+    )
+    prompt_template = get_prompt_template(prompt_name)
+    # print(prompt_template)
+    input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+    chat_prompt = ChatPromptTemplate.from_messages(
+        [i.to_msg_template() for i in history] + [input_msg])
+    chain = LLMChain(prompt=chat_prompt, llm=model)
+    return chain.run({"input": query})
+
+if __name__ == "__main__":
+    chat_local(query="你好,介绍一下清华大学")

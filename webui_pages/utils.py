@@ -34,7 +34,7 @@ import nltk
 
 nltk.data.path = [NLTK_DATA_PATH] + nltk.data.path
 from pprint import pprint
-from wikiES.query_wiki import searchRelatedContent
+from es.queryES import searchRelatedContent
 import os
 import asyncio
 

@@ -1,4 +1,3 @@
-
 import os
 import shutil
 
@@ -62,6 +61,7 @@ class FaissKBService(KBService):
                   embeddings: Embeddings = None,
                   ) -> List[Document]:
         with self.load_vector_store().acquire() as vs:
+            # docs = vs.max_marginal_relevance_search_with_score_by_vector(embedding=vs.embedding_function(query), k=top_k, fetch_k=2 * top_k,)
             docs = vs.similarity_search_with_score(query, k=top_k, score_threshold=score_threshold)
         return docs
 
@@ -106,8 +106,10 @@ class FaissKBService(KBService):
 
 
 if __name__ == '__main__':
-    faissService = FaissKBService("test")
-    faissService.add_doc(KnowledgeFile("README.md", "test"))
-    faissService.delete_doc(KnowledgeFile("README.md", "test"))
-    faissService.do_drop_kb()
-    print(faissService.search_docs("如何启动api服务"))
+    faissService = FaissKBService("习近平重要讲话数据库")
+    # faissService.add_doc(KnowledgeFile("test.txt", "习近平重要讲话数据库"))
+    # # faissService.delete_doc(KnowledgeFile("README.md", "samples"))
+    # faissService.do_drop_kb()
+    query = "习近平1975年在干什么"
+    for i in faissService.search_docs(query=query, top_k=10, score_threshold=0.5):
+        print(i)

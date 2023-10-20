@@ -1,1 +1,1 @@
-from .query_wiki import *
+from .queryES import *

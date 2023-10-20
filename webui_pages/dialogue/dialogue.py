@@ -33,6 +33,8 @@ def get_messages_history(history_len: int, content_in_expander: bool = False) ->
             "role": msg["role"],
             "content": "\n\n".join(content),
         }
+    if history_len == 0:
+        return []
 
     return chat_box.filter_history(history_len=history_len, filter=filter)
 
@@ -143,7 +145,9 @@ def dialogue_page(api: ApiRequest):
     chat_input_placeholder = "请输入对话内容，换行请使用Shift+Enter "
 
     if prompt := st.chat_input(chat_input_placeholder, key="prompt"):
+        print(history_len)
         history = get_messages_history(history_len)
+        print(history)
         chat_box.user_say(prompt)
         if dialogue_mode == "LLM 对话":
             chat_box.ai_say("正在思考...")

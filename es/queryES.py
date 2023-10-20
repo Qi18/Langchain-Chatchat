@@ -34,8 +34,12 @@ def searchRelatedContent(query: str,
     words = pseg.cut(query)
     tokens = []
     for word, flag in words:
-        if 'n' in flag:
-            tokens.append(word)
+        print(word + ":" + flag)
+        saveWords = ['nr', 'ns', 'nt', 'nz']
+        for element in saveWords:
+            if element in flag:
+                tokens.append(word)
+                break
     # 去除停用词
     # stopwordsFile = "./all.stopwords"
     # stopwords = set()
@@ -87,7 +91,7 @@ def searchRelatedContent(query: str,
                 "should": boolList
             }
         },
-        "size": len(realTokens) * 10,
+        "size": len(realTokens) * 3,
     }
     response = es.search(index=indexName, body=query_body)
     for res in response['hits']['hits']:
@@ -130,6 +134,6 @@ def searchRelatedContent(query: str,
     return ans
 
 if __name__ == "__main__":
-    query = "习近平在2017年干了什么"
+    query = "习近平什么时候当选为党的总书记"
     for i in searchRelatedContent(query):
         print(i)

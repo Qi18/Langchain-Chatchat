@@ -14,6 +14,7 @@ from configs import (
     text_splitter_dict,
     LLM_MODEL,
     TEXT_SPLITTER_NAME,
+    VLLM_MODEL_DICT,
 )
 import importlib
 from text_splitter import zh_title_enhance as func_zh_title_enhance
@@ -236,7 +237,8 @@ def make_text_splitter(
                 if text_splitter_dict[splitter_name]["tokenizer_name_or_path"] == "gpt2":
                     from transformers import GPT2TokenizerFast
                     from langchain.text_splitter import CharacterTextSplitter
-                    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+                    # tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+                    tokenizer = GPT2TokenizerFast.from_pretrained(VLLM_MODEL_DICT["gpt2"])
                 else:  ## 字符长度加载
                     tokenizer = AutoTokenizer.from_pretrained(
                         text_splitter_dict[splitter_name]["tokenizer_name_or_path"],
@@ -399,10 +401,12 @@ def files2docs_in_thread(
 if __name__ == "__main__":
     from pprint import pprint
 
-    kb_file = KnowledgeFile(filename="test.txt", knowledge_base_name="samples")
-    # kb_file.text_splitter_name = "RecursiveCharacterTextSplitter"
-    docs = kb_file.file2docs()
-    pprint(docs[-1])
-
-    docs = kb_file.file2text()
-    pprint(docs[-1])
+    # kb_file = KnowledgeFile(filename="test.txt", knowledge_base_name="samples")
+    # # kb_file.text_splitter_name = "RecursiveCharacterTextSplitter"
+    # docs = kb_file.file2docs()
+    # pprint(docs[-1])
+    #
+    # docs = kb_file.file2text()
+    # pprint(docs[-1])
+    from transformers import GPT2TokenizerFast, AutoTokenizer
+    tokenizer = GPT2TokenizerFast.from_pretrained("../../temp/gpt2")
