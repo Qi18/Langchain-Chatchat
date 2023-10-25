@@ -284,6 +284,7 @@ class KnowledgeFile:
         self.filepath = get_file_path(knowledge_base_name, filename)
         self.docs = None
         self.splited_docs = None
+        self.full_docs = None
         self.document_loader_name = get_LoaderClass(self.ext)
         self.text_splitter_name = TEXT_SPLITTER_NAME
 
@@ -324,6 +325,33 @@ class KnowledgeFile:
         self.splited_docs = docs
         return self.splited_docs
 
+    def docs2full_texts(self,
+        docs: List[Document] = None,
+        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
+        refresh: bool = False,
+        text_splitter: TextSplitter = None,
+    ):
+        docs = docs or self.file2docs(refresh=refresh)
+        if not docs:
+            return []
+        if self.ext not in [".csv"]:
+            if text_splitter is None:
+                text_splitter = make_text_splitter(splitter_name=self.text_splitter_name, chunk_size=1000,
+                                                   chunk_overlap=0)
+            if self.text_splitter_name == "MarkdownHeaderTextSplitter":
+                docs = text_splitter.split_text(docs[0].page_content)
+                for doc in docs:
+                    # 如果文档有元数据
+                    if doc.metadata:
+                        doc.metadata["source"] = os.path.basename(self.filepath)
+            else:
+                self.full_docs = text_splitter.split_documents(docs)
+        self.full_docs = Document(page_content=''.join(i.page_content for i in self.full_docs))
+        print(f"原文档切分示例：{docs[0]}")
+        if zh_title_enhance:
+            self.full_docs = func_zh_title_enhance(self.full_docs)
+        return [self.full_docs]
+
     def file2text(
         self,
         zh_title_enhance: bool = ZH_TITLE_ENHANCE,
@@ -341,6 +369,22 @@ class KnowledgeFile:
                                                 chunk_overlap=chunk_overlap,
                                                 text_splitter=text_splitter)
         return self.splited_docs
+
+    def file2full_text(
+        self,
+        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
+        refresh: bool = False,
+        chunk_size: int = CHUNK_SIZE,
+        chunk_overlap: int = OVERLAP_SIZE,
+        text_splitter: TextSplitter = None,
+    ):
+        if self.full_docs is None or refresh:
+            docs = self.file2docs()
+            self.full_docs = self.docs2full_texts(docs=docs,
+                                                zh_title_enhance=zh_title_enhance,
+                                                refresh=refresh,
+                                                text_splitter=text_splitter)
+        return self.full_docs
 
     def file_exist(self):
         return os.path.isfile(self.filepath)

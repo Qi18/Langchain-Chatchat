@@ -18,7 +18,7 @@ from server.knowledge_base.kb_service.base import KBServiceFactory
 from server.db.repository.knowledge_file_repository import get_file_detail
 from typing import List, Dict
 from langchain.docstore.document import Document
-from server.chat.chat import chat, chat_local
+from server.chat.chat import chat, summaryWithLLM
 
 
 class DocumentWithScore(Document):
@@ -135,7 +135,8 @@ def upload_docs(files: List[UploadFile] = File(..., description="上传文件，
                 docs: Json = Form({}, description="自定义的docs，需要转为json字符串",
                                   examples=[{"test.txt": [Document(page_content="custom doc")]}]),
                 not_refresh_vs_cache: bool = Form(False, description="暂不保存向量库（用于FAISS）"),
-                use_summary: bool = Form(False, description="用作添加一个总结文档")
+                use_summary: bool = Form(False, description="用作添加一个总结文档"),
+                use_raw: bool = Form(False, description="是否添加原文档进向量库"),
                 ) -> BaseResponse:
     '''
     API接口：上传文件，并/或向量化
@@ -170,7 +171,8 @@ def upload_docs(files: List[UploadFile] = File(..., description="上传文件，
             zh_title_enhance=zh_title_enhance,
             docs=docs,
             not_refresh_vs_cache=True,
-            use_summary=use_summary
+            use_summary=use_summary,
+            use_raw=use_raw
         )
         failed_files.update(result.data["failed_files"])
         if not not_refresh_vs_cache:
@@ -224,6 +226,7 @@ def update_docs(
                           examples=[{"test.txt": [Document(page_content="custom doc")]}]),
         not_refresh_vs_cache: bool = Body(False, description="暂不保存向量库（用于FAISS）"),
         use_summary: bool = Form(False, description="用作添加一个总结文档"),
+        use_raw: bool = Form(False, description="是否添加原文档进向量库"),
 ) -> BaseResponse:
     '''
     更新知识库文档
@@ -275,6 +278,15 @@ def update_docs(
                     zh_title_enhance=zh_title_enhance,
                     not_refresh_vs_cache=True,
                 )
+            if use_raw:
+                name = os.path.splitext(file_name)[0]
+                suffix = os.path.splitext(file_name)[1]
+                kb_file = KnowledgeFile(filename=file_name,
+                                        knowledge_base_name=knowledge_base_name)
+                kb_file.file2full_text()
+                new_kb_file = KnowledgeFile(name + "_raw" + suffix,
+                                        knowledge_base_name=knowledge_base_name)
+                kb.update_doc(kb_file=new_kb_file, docs=kb_file.full_docs, not_refresh_vs_cache=True)
             kb.update_doc(kb_file, not_refresh_vs_cache=True)
         else:
             kb_name, file_name, error = result
@@ -412,8 +424,8 @@ def summaryFile(
     if kb is None:
         return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
     query = f"文章的标题为：{file[0]}。文章的内容为：{file[1]}"
-    print(query)
-    summary = chat_local(query=query, prompt_name="summary")
+    # print(query)
+    summary = summaryWithLLM(doc=query)
     file_object = BytesIO(summary.encode('utf-8'))
     name = os.path.splitext(file[0])[0]
     suffix = os.path.splitext(file[0])[1]
@@ -441,7 +453,8 @@ def summaryFile(
         zh_title_enhance=zh_title_enhance,
         not_refresh_vs_cache=True,
         docs={},
-        use_summary=False
+        use_summary=False,
+        use_raw=False
     )
     failed_files.update(result.data["failed_files"])
     if not not_refresh_vs_cache:

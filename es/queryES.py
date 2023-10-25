@@ -40,17 +40,6 @@ def searchRelatedContent(query: str,
             if element in flag:
                 tokens.append(word)
                 break
-    # 去除停用词
-    # stopwordsFile = "./all.stopwords"
-    # stopwords = set()
-    # with open(stopwordsFile, 'r', encoding='utf-8') as file:
-    #     content = file.readlines()
-    #     for line in content:
-    #         stopwords.add(line.replace("\n", ""))
-    # realTokens = []
-    # for token in tokens:
-    #     if token not in stopwords and len(token) > 1:
-    #         realTokens.append(token)
     realTokens = tokens
     print("分析query的出来需要查询的词汇是：")
     print(realTokens)
