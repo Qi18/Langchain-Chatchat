@@ -2,6 +2,8 @@ from elasticsearch import Elasticsearch, helpers, exceptions
 import os
 import jieba.posseg as pseg
 from configs.server_config import DEFAULT_BIND_HOST
+from server.knowledge_base.kb_service.es_utils import generate_knn_query, generate_hybrid_query, generate_search_query, \
+    _default_knn_setting, generate_keywords_query, es_params, host, es_client
 
 
 def delIndex(es, indexName):
@@ -27,7 +29,7 @@ def countAll(es, indexName):
 
 def searchRelatedContent(query: str,
            indexName: str = "baike"):
-    es = Elasticsearch([{'host': DEFAULT_BIND_HOST, 'port': 9200}])
+    es = es_client
     # 分词query
     # analysis = es.indices.analyze(index=indexName, body={"text": query, "analyzer": "ik_max_word"}, )
     # tokens = [token['token'] for token in analysis['tokens']]

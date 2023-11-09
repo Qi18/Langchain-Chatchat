@@ -30,8 +30,8 @@ chmod 777 -R /data/lrq/llm/sync/es
 ### 4. 启动ES镜像
 
 ```sh
-docker run --name es01 \
---net elastic -p 9200:9200 \
+docker run --name esLLM \
+--net elastic -p 9201:9200 \
 -v /data/lrq/llm/sync/es/data:/usr/share/elasticsearch/data \
 -v /data/lrq/llm/sync/es/logs:/usr/share/elasticsearch/logs \
 -v /data/lrq/llm/sync/es/plugins:/usr/share/elasticsearch/plugins \
@@ -43,7 +43,7 @@ docker run --name es01 \
 ### 5.启动kibana镜像
 
 ```sh
-docker run --name kib-01 --net elastic -p 5601:5601 elastic/kibana:8.8.2
+docker run --name kibLLM --net elastic -p 5602:5601 elastic/kibana:8.8.2
 ```
 
 
@@ -53,7 +53,7 @@ docker run --name kib-01 --net elastic -p 5601:5601 elastic/kibana:8.8.2
 ##### 取出证书
 
 ```sh
-docker cp es01:/usr/share/elasticsearch/config/certs/http_ca.crt .
+docker cp esLLM:/usr/share/elasticsearch/config/certs/http_ca.crt .
 ```
 
 ##### 重置密码 

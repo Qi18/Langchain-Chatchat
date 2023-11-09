@@ -54,9 +54,17 @@ einops
 scipy
 transformers_stream_generator==0.0.4
 
-elasticsearch==7.9.1
+# elasticsearch==7.9.1
+elasticsearch>=8.8.0
 jieba==0.42.1
 # baichuan模型使用
-xformers
+# xformers
+# baichuan13B-4bits量化使用
+bitsandbytes==0.41.1
+# bge-rerank使用
+FlagEmbedding
+
+rich
+loguru
 
 

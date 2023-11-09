@@ -136,12 +136,50 @@ class EmbeddingsPool(CachePool):
                         query_instruction = ""
                     embeddings = HuggingFaceBgeEmbeddings(model_name=get_model_path(model),
                                                           model_kwargs={'device': device},
+                                                          encode_kwargs={'normalize_embeddings': True},
                                                           query_instruction=query_instruction)             
                     if model == "bge-large-zh-noinstruct":  # bge large -noinstruct embedding
                         embeddings.query_instruction = ""
                 else:
                     embeddings = HuggingFaceEmbeddings(model_name=get_model_path(model), model_kwargs={'device': device})
                 item.obj = embeddings
+                item.finish_loading()
+        else:
+            self.atomic.release()
+        return self.get(key).obj
+
+    def load_bge_embeddings(self, model: str, device: str) -> List[Embeddings]:
+        if "bge-" not in model:
+            return None
+        self.atomic.acquire()
+        model = model or EMBEDDING_MODEL
+        device = device or embedding_device()
+        key = (model, device)
+        if not self.get(key):
+            item = ThreadSafeObject(key, pool=self)
+            self.set(key, item)
+            with item.acquire(msg="初始化"):
+                self.atomic.release()
+
+                if 'zh' in model:
+                    # for chinese model
+                    query_instruction = "为这个句子生成表示以用于检索相关文章："
+                elif 'en' in model:
+                    # for english model
+                    query_instruction = "Represent this sentence for searching relevant passages:"
+                else:
+                    # maybe ReRanker or else, just use empty string instead
+                    query_instruction = ""
+                embeddings = HuggingFaceBgeEmbeddings(model_name=get_model_path(model),
+                                                      model_kwargs={'device': device},
+                                                      query_instruction=query_instruction)
+                if model == "bge-large-zh-noinstruct":  # bge large -noinstruct embedding
+                    embeddings.query_instruction = ""
+                if embeddings.query_instruction != "":
+                    embeddings2 = HuggingFaceBgeEmbeddings(model_name=get_model_path(model),
+                                                          model_kwargs={'device': device},
+                                                          query_instruction="")
+                item.obj = [embeddings, embeddings2]
                 item.finish_loading()
         else:
             self.atomic.release()

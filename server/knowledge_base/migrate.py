@@ -6,7 +6,7 @@ from server.knowledge_base.utils import (get_file_path, list_kbs_from_folder,
                                         list_files_from_folder,files2docs_in_thread,
                                         KnowledgeFile,)
 from server.knowledge_base.kb_service.base import KBServiceFactory
-from server.db.repository.knowledge_file_repository import add_file_to_db
+from server.db.repository.knowledge_file_repository import add_file_to_db, add_files_to_db
 from server.db.base import Base, engine
 import os
 from typing import Literal, Any, List
@@ -52,6 +52,7 @@ def folder2db(
         increament: create vector store and database info for local files that not existed in database only
     '''
     def files2vs(kb_name: str, kb_files: List[KnowledgeFile]):
+        db_data, db_files = [], []
         for success, result in files2docs_in_thread(kb_files,
                                                     chunk_size=chunk_size,
                                                     chunk_overlap=chunk_overlap,
@@ -61,9 +62,15 @@ def folder2db(
                 print(f"正在将 {kb_name}/{filename} 添加到向量库，共包含{len(docs)}条文档")
                 kb_file = KnowledgeFile(filename=filename, knowledge_base_name=kb_name)
                 kb_file.splited_docs = docs
-                kb.add_doc(kb_file=kb_file, not_refresh_vs_cache=True)
+                custom_docs, length_docs, doc_infos = kb.add_doc(kb_file=kb_file, not_refresh_vs_cache=True)
+                if length_docs != 0:
+                    db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
+                    db_files.append(kb_file)
             else:
                 print(result)
+        ## 将meta信息统一写入数据库
+        add_files_to_db(kb_files=db_files, kb_data=db_data)
+
 
     kb_names = kb_names or list_kbs_from_folder()
     for kb_name in kb_names:

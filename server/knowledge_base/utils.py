@@ -1,7 +1,7 @@
-
 import os
 
-from transformers import AutoTokenizer
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from configs import (
     EMBEDDING_MODEL,
@@ -14,7 +14,7 @@ from configs import (
     text_splitter_dict,
     LLM_MODEL,
     TEXT_SPLITTER_NAME,
-    VLLM_MODEL_DICT,
+    VLLM_MODEL_DICT, RERANK_MODEL,
 )
 import importlib
 from text_splitter import zh_title_enhance as func_zh_title_enhance
@@ -24,7 +24,7 @@ from langchain.text_splitter import TextSplitter
 from pathlib import Path
 import json
 from concurrent.futures import ThreadPoolExecutor
-from server.utils import run_in_thread_pool, embedding_device, get_model_worker_config
+from server.utils import run_in_thread_pool, embedding_device, get_model_worker_config, rerank_device
 import io
 from typing import List, Union, Callable, Dict, Optional, Tuple, Generator
 import chardet
@@ -69,6 +69,8 @@ def load_embeddings(model: str = EMBEDDING_MODEL, device: str = embedding_device
     从缓存中加载embeddings，可以避免多线程时竞争加载。
     '''
     from server.knowledge_base.kb_cache.base import embeddings_pool
+    # if "bge-" in model:
+    #     return embeddings_pool.load_bge_embeddings(model=model, device=device)
     return embeddings_pool.load_embeddings(model=model, device=device)
 
 
@@ -92,12 +94,12 @@ class CustomJSONLoader(langchain.document_loaders.JSONLoader):
     '''
 
     def __init__(
-        self,
-        file_path: Union[str, Path],
-        content_key: Optional[str] = None,
-        metadata_func: Optional[Callable[[Dict, Dict], Dict]] = None,
-        text_content: bool = True,
-        json_lines: bool = False,
+            self,
+            file_path: Union[str, Path],
+            content_key: Optional[str] = None,
+            metadata_func: Optional[Callable[[Dict, Dict], Dict]] = None,
+            text_content: bool = True,
+            json_lines: bool = False,
     ):
         """Initialize the JSONLoader.
 
@@ -191,10 +193,10 @@ def get_loader(loader_name: str, file_path_or_content: Union[str, bytes, io.Stri
 
 
 def make_text_splitter(
-    splitter_name: str = TEXT_SPLITTER_NAME,
-    chunk_size: int = CHUNK_SIZE,
-    chunk_overlap: int = OVERLAP_SIZE,
-    llm_model: str = LLM_MODEL,
+        splitter_name: str = TEXT_SPLITTER_NAME,
+        chunk_size: int = CHUNK_SIZE,
+        chunk_overlap: int = OVERLAP_SIZE,
+        llm_model: str = LLM_MODEL,
 ):
     """
     根据参数获取特定的分词器
@@ -267,6 +269,7 @@ def make_text_splitter(
         text_splitter = TextSplitter(chunk_size=250, chunk_overlap=50)
     return text_splitter
 
+
 class KnowledgeFile:
     def __init__(
             self,
@@ -288,28 +291,33 @@ class KnowledgeFile:
         self.document_loader_name = get_LoaderClass(self.ext)
         self.text_splitter_name = TEXT_SPLITTER_NAME
 
-    def file2docs(self, refresh: bool=False):
-        if self.docs is None or refresh:
-            logger.info(f"{self.document_loader_name} used for {self.filepath}")
-            loader = get_loader(self.document_loader_name, self.filepath)
-            self.docs = loader.load()
-        return self.docs
+    def file2docs(self, refresh: bool = False):
+        try:
+            if self.docs is None or refresh:
+                logger.info(f"{self.document_loader_name} used for {self.filepath}")
+                loader = get_loader(self.document_loader_name, self.filepath)
+                self.docs = loader.load()
+            return self.docs
+        ##可能会有文件名过长的情况
+        except Exception as e:
+            return ""
 
     def docs2texts(
-        self,
-        docs: List[Document] = None,
-        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
-        refresh: bool = False,
-        chunk_size: int = CHUNK_SIZE,
-        chunk_overlap: int = OVERLAP_SIZE,
-        text_splitter: TextSplitter = None,
+            self,
+            docs: List[Document] = None,
+            zh_title_enhance: bool = ZH_TITLE_ENHANCE,
+            refresh: bool = False,
+            chunk_size: int = CHUNK_SIZE,
+            chunk_overlap: int = OVERLAP_SIZE,
+            text_splitter: TextSplitter = None,
     ):
         docs = docs or self.file2docs(refresh=refresh)
         if not docs:
             return []
         if self.ext not in [".csv"]:
             if text_splitter is None:
-                text_splitter = make_text_splitter(splitter_name=self.text_splitter_name, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+                text_splitter = make_text_splitter(splitter_name=self.text_splitter_name, chunk_size=chunk_size,
+                                                   chunk_overlap=chunk_overlap)
             if self.text_splitter_name == "MarkdownHeaderTextSplitter":
                 docs = text_splitter.split_text(docs[0].page_content)
                 for doc in docs:
@@ -326,11 +334,11 @@ class KnowledgeFile:
         return self.splited_docs
 
     def docs2full_texts(self,
-        docs: List[Document] = None,
-        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
-        refresh: bool = False,
-        text_splitter: TextSplitter = None,
-    ):
+                        docs: List[Document] = None,
+                        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
+                        refresh: bool = False,
+                        text_splitter: TextSplitter = None,
+                        ):
         docs = docs or self.file2docs(refresh=refresh)
         if not docs:
             return []
@@ -353,12 +361,12 @@ class KnowledgeFile:
         return [self.full_docs]
 
     def file2text(
-        self,
-        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
-        refresh: bool = False,
-        chunk_size: int = CHUNK_SIZE,
-        chunk_overlap: int = OVERLAP_SIZE,
-        text_splitter: TextSplitter = None,
+            self,
+            zh_title_enhance: bool = ZH_TITLE_ENHANCE,
+            refresh: bool = False,
+            chunk_size: int = CHUNK_SIZE,
+            chunk_overlap: int = OVERLAP_SIZE,
+            text_splitter: TextSplitter = None,
     ):
         if self.splited_docs is None or refresh:
             docs = self.file2docs()
@@ -371,19 +379,19 @@ class KnowledgeFile:
         return self.splited_docs
 
     def file2full_text(
-        self,
-        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
-        refresh: bool = False,
-        chunk_size: int = CHUNK_SIZE,
-        chunk_overlap: int = OVERLAP_SIZE,
-        text_splitter: TextSplitter = None,
+            self,
+            zh_title_enhance: bool = ZH_TITLE_ENHANCE,
+            refresh: bool = False,
+            chunk_size: int = CHUNK_SIZE,
+            chunk_overlap: int = OVERLAP_SIZE,
+            text_splitter: TextSplitter = None,
     ):
         if self.full_docs is None or refresh:
             docs = self.file2docs()
             self.full_docs = self.docs2full_texts(docs=docs,
-                                                zh_title_enhance=zh_title_enhance,
-                                                refresh=refresh,
-                                                text_splitter=text_splitter)
+                                                  zh_title_enhance=zh_title_enhance,
+                                                  refresh=refresh,
+                                                  text_splitter=text_splitter)
         return self.full_docs
 
     def file_exist(self):
@@ -408,6 +416,7 @@ def files2docs_in_thread(
     如果传入参数是Tuple，形式为(filename, kb_name)
     生成器返回值为 status, (kb_name, file_name, docs | error)
     '''
+
     def file2docs(*, file: KnowledgeFile, **kwargs) -> Tuple[bool, Tuple[str, str, List[Document]]]:
         try:
             return True, (file.kb_name, file.filename, file.file2text(**kwargs))
@@ -422,8 +431,8 @@ def files2docs_in_thread(
         kwargs = {}
         try:
             if isinstance(file, tuple) and len(file) >= 2:
-                filename=file[0]
-                kb_name=file[1]
+                filename = file[0]
+                kb_name = file[1]
                 file = KnowledgeFile(filename=filename, knowledge_base_name=kb_name)
             elif isinstance(file, dict):
                 filename = file.pop("filename")
@@ -453,4 +462,5 @@ if __name__ == "__main__":
     # docs = kb_file.file2text()
     # pprint(docs[-1])
     from transformers import GPT2TokenizerFast, AutoTokenizer
+
     tokenizer = GPT2TokenizerFast.from_pretrained("../../temp/gpt2")

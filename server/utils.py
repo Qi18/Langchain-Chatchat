@@ -1,4 +1,3 @@
-
 import pydantic
 from pydantic import BaseModel
 from typing import List
@@ -8,7 +7,7 @@ import asyncio
 from configs import (LLM_MODEL, LLM_DEVICE, EMBEDDING_DEVICE,
                      MODEL_PATH, MODEL_ROOT_PATH, ONLINE_LLM_MODEL,
                      logger, log_verbose,
-                     FSCHAT_MODEL_WORKERS, HTTPX_DEFAULT_TIMEOUT)
+                     FSCHAT_MODEL_WORKERS, HTTPX_DEFAULT_TIMEOUT, RERANK_DEVICE)
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain.chat_models import ChatOpenAI
@@ -463,6 +462,13 @@ def llm_device(device: str = None) -> Literal["cuda", "mps", "cpu"]:
 
 def embedding_device(device: str = None) -> Literal["cuda", "mps", "cpu"]:
     device = device or EMBEDDING_DEVICE
+    if device not in ["cuda", "mps", "cpu"]:
+        device = detect_device()
+    return device
+
+
+def rerank_device(device: str = None) -> Literal["cuda", "mps", "cpu"]:
+    device = device or RERANK_DEVICE
     if device not in ["cuda", "mps", "cpu"]:
         device = detect_device()
     return device

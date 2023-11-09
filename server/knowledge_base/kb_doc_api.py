@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import Json
 import json
 from server.knowledge_base.kb_service.base import KBServiceFactory
-from server.db.repository.knowledge_file_repository import get_file_detail
+from server.db.repository.knowledge_file_repository import get_file_detail, add_files_to_db
 from typing import List, Dict
 from langchain.docstore.document import Document
 from server.chat.chat import chat, summaryWithLLM
@@ -258,51 +258,80 @@ def update_docs(
 
     # 从文件生成docs，并进行向量化。
     # 这里利用了KnowledgeFile的缓存功能，在多线程中加载Document，然后传给KnowledgeFile
-    for status, result in files2docs_in_thread(kb_files,
-                                               chunk_size=chunk_size,
-                                               chunk_overlap=chunk_overlap,
-                                               zh_title_enhance=zh_title_enhance):
-        if status:
-            kb_name, file_name, new_docs = result
-            kb_file = KnowledgeFile(filename=file_name,
-                                    knowledge_base_name=knowledge_base_name)
-            kb_file.splited_docs = new_docs
-            # 对需要summary的文档进行总结
-            if use_summary:
-                result = summaryFile(
-                    file=(file_name, kb_file.file2text()),
-                    knowledge_base_name=knowledge_base_name,
-                    override=override_custom_docs,
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap,
-                    zh_title_enhance=zh_title_enhance,
-                    not_refresh_vs_cache=True,
-                )
-            if use_raw:
-                name = os.path.splitext(file_name)[0]
-                suffix = os.path.splitext(file_name)[1]
-                kb_file = KnowledgeFile(filename=file_name,
-                                        knowledge_base_name=knowledge_base_name)
-                kb_file.file2full_text()
-                new_kb_file = KnowledgeFile(name + "_raw" + suffix,
-                                        knowledge_base_name=knowledge_base_name)
-                kb.update_doc(kb_file=new_kb_file, docs=kb_file.full_docs, not_refresh_vs_cache=True)
-            kb.update_doc(kb_file, not_refresh_vs_cache=True)
-        else:
-            kb_name, file_name, error = result
-            failed_files[file_name] = error
+    db_data = []
+    db_files = []
+    for file in kb_files:
+        file.file2text(chunk_size=chunk_size,
+                       chunk_overlap=chunk_overlap,
+                       zh_title_enhance=zh_title_enhance)
+        custom_docs, length_docs, doc_infos = kb.update_doc(file, not_refresh_vs_cache=True)
+        if length_docs != 0:
+            db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
+            db_files.append(file)
+        if use_summary:
+            success, summary_file = summaryFile(
+                file=(file.filename, file.file2full_text()),
+                knowledge_base_name=knowledge_base_name,
+                override=override_custom_docs,
+            )
+            if success:
+                custom_docs, length_docs, doc_infos = kb.update_doc(summary_file, not_refresh_vs_cache=True)
+                if length_docs != 0:
+                    db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
+                    db_files.append(summary_file)
+
+    # for status, result in files2docs_in_thread(kb_files,
+    #                                            chunk_size=chunk_size,
+    #                                            chunk_overlap=chunk_overlap,
+    #                                            zh_title_enhance=zh_title_enhance):
+    #     if status:
+    #         kb_name, file_name, new_docs = result
+    #         kb_file = KnowledgeFile(filename=file_name,
+    #                                 knowledge_base_name=knowledge_base_name)
+    #         kb_file.splited_docs = new_docs
+    #         # 对需要summary的文档进行总结
+    #         if use_summary:
+    #             result = summaryFile(
+    #                 file=(file_name, kb_file.file2text()),
+    #                 knowledge_base_name=knowledge_base_name,
+    #                 override=override_custom_docs,
+    #                 chunk_size=chunk_size,
+    #                 chunk_overlap=chunk_overlap,
+    #                 zh_title_enhance=zh_title_enhance,
+    #                 not_refresh_vs_cache=True,
+    #             )
+    #         if use_raw:
+    #             name = os.path.splitext(file_name)[0]
+    #             suffix = os.path.splitext(file_name)[1]
+    #             kb_file = KnowledgeFile(filename=file_name,
+    #                                     knowledge_base_name=knowledge_base_name)
+    #             kb_file.file2full_text()
+    #             new_kb_file = KnowledgeFile(name + "_raw" + suffix,
+    #                                     knowledge_base_name=knowledge_base_name)
+    #             kb.update_doc(kb_file=new_kb_file, docs=kb_file.full_docs, not_refresh_vs_cache=True)
+    #         kb.update_doc(kb_file, not_refresh_vs_cache=True)
+    #     else:
+    #         kb_name, file_name, error = result
+    #         failed_files[file_name] = error
+
 
     # 将自定义的docs进行向量化
     for file_name, v in docs.items():
         try:
             v = [x if isinstance(x, Document) else Document(**x) for x in v]
             kb_file = KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name)
-            kb.update_doc(kb_file, docs=v, not_refresh_vs_cache=True)
+            custom_docs, length_docs, doc_infos = kb.update_doc(kb_file, docs=v, not_refresh_vs_cache=True)
+            if length_docs != 0:
+                db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
+                db_files.append(kb_file)
         except Exception as e:
             msg = f"为 {file_name} 添加自定义docs时出错：{e}"
             logger.error(f'{e.__class__.__name__}: {msg}',
                          exc_info=e if log_verbose else None)
             failed_files[file_name] = msg
+
+    ## 将meta信息统一写入数据库
+    add_files_to_db(kb_files=db_files, kb_data=db_data)
 
     if not not_refresh_vs_cache:
         kb.save_vector_store()
@@ -377,6 +406,7 @@ def recreate_vector_store(
             files = list_files_from_folder(knowledge_base_name)
             kb_files = [(file, knowledge_base_name) for file in files]
             i = 0
+            db_data, db_files = [], []
             for status, result in files2docs_in_thread(kb_files,
                                                        chunk_size=chunk_size,
                                                        chunk_overlap=chunk_overlap,
@@ -392,7 +422,10 @@ def recreate_vector_store(
                         "finished": i,
                         "doc": file_name,
                     }, ensure_ascii=False)
-                    kb.add_doc(kb_file, not_refresh_vs_cache=True)
+                    custom_docs, length_docs, doc_infos = kb.add_doc(kb_file, not_refresh_vs_cache=True)
+                    if length_docs != 0:
+                        db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
+                        db_files.append(kb_file)
                 else:
                     kb_name, file_name, error = result
                     msg = f"添加文件‘{file_name}’到知识库‘{knowledge_base_name}’时出错：{error}。已跳过。"
@@ -402,6 +435,8 @@ def recreate_vector_store(
                         "msg": msg,
                     })
                 i += 1
+            ## 将meta信息统一写入数据库
+            add_files_to_db(kb_files=db_files, kb_data=db_data)
             if not not_refresh_vs_cache:
                 kb.save_vector_store()
 
@@ -412,10 +447,6 @@ def summaryFile(
         file: tuple,
         knowledge_base_name: str,
         override: bool = False,
-        chunk_size: int = CHUNK_SIZE,
-        chunk_overlap: int = OVERLAP_SIZE,
-        zh_title_enhance: bool = ZH_TITLE_ENHANCE,
-        not_refresh_vs_cache: bool = False,
 ):
     if not validate_kb_name(knowledge_base_name):
         return BaseResponse(code=403, msg="Don't attack me")
@@ -429,7 +460,7 @@ def summaryFile(
     file_object = BytesIO(summary.encode('utf-8'))
     name = os.path.splitext(file[0])[0]
     suffix = os.path.splitext(file[0])[1]
-    newfilename = name + "_summary" + suffix
+    newfilename = name + "_summary.txt"
     UploadFile(filename=newfilename, file=file_object)
 
     failed_files = {}
@@ -442,20 +473,8 @@ def summaryFile(
         if result["code"] != 200:
             failed_files[filename] = result["msg"]
 
-        if filename not in file_names:
-            file_names.append(filename)
-    result = update_docs(
-        knowledge_base_name=knowledge_base_name,
-        file_names=[newfilename],
-        override_custom_docs=True,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        zh_title_enhance=zh_title_enhance,
-        not_refresh_vs_cache=True,
-        docs={},
-        use_summary=False,
-        use_raw=False
-    )
-    failed_files.update(result.data["failed_files"])
-    if not not_refresh_vs_cache:
-        kb.save_vector_store()
+    if newfilename in failed_files.keys():
+        return False, None
+    return True, KnowledgeFile(filename=newfilename, knowledge_base_name=knowledge_base_name)
+
+

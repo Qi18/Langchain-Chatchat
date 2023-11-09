@@ -1,4 +1,3 @@
-
 import operator
 from abc import ABC, abstractmethod
 
@@ -16,17 +15,18 @@ from server.db.repository.knowledge_base_repository import (
 from server.db.repository.knowledge_file_repository import (
     add_file_to_db, delete_file_from_db, delete_files_from_db, file_exists_in_db,
     count_files_from_db, list_files_from_db, get_file_detail, delete_file_from_db,
-    list_docs_from_db,
+    list_docs_from_db, add_files_to_db,
 )
 
 from configs import (kbs_config, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD,
-                    EMBEDDING_MODEL)
+                     EMBEDDING_MODEL, DEFAULT_VS_TYPE, RERANK_MODEL)
 from server.knowledge_base.utils import (
     get_kb_path, get_doc_path, load_embeddings, KnowledgeFile,
-    list_kbs_from_folder, list_files_from_folder,
+    list_kbs_from_folder, list_files_from_folder
 )
-from server.utils import embedding_device
-from typing import List, Union, Dict, Optional
+from server.utils import embedding_device, rerank_device
+from typing import List, Union, Dict, Optional, Tuple, Any
+from server.knowledge_base.kb_cache.rerank_model import load_rerank_model, ReRankModel
 
 
 class SupportedVSType:
@@ -34,6 +34,7 @@ class SupportedVSType:
     MILVUS = 'milvus'
     DEFAULT = 'default'
     PG = 'pg'
+    ES = 'es'
 
 
 class KBService(ABC):
@@ -41,15 +42,20 @@ class KBService(ABC):
     def __init__(self,
                  knowledge_base_name: str,
                  embed_model: str = EMBEDDING_MODEL,
+                 rerank_model: str = RERANK_MODEL,
                  ):
         self.kb_name = knowledge_base_name
         self.embed_model = embed_model
+        self.rerank_model = rerank_model
         self.kb_path = get_kb_path(self.kb_name)
         self.doc_path = get_doc_path(self.kb_name)
         self.do_init()
 
     def _load_embeddings(self, embed_device: str = embedding_device()) -> Embeddings:
         return load_embeddings(self.embed_model, embed_device)
+
+    def _load_reranks(self, rerank_device: str = rerank_device()) -> ReRankModel:
+        return load_rerank_model(self.rerank_model, rerank_device)
 
     def save_vector_store(self):
         '''
@@ -99,13 +105,35 @@ class KBService(ABC):
         if docs:
             self.delete_doc(kb_file)
             doc_infos = self.do_add_doc(docs, **kwargs)
-            status = add_file_to_db(kb_file,
-                                    custom_docs=custom_docs,
-                                    docs_count=len(docs),
-                                    doc_infos=doc_infos)
-        else:
-            status = False
-        return status
+            return custom_docs, len(docs), doc_infos
+        return False, 0, []
+
+    # def add_docs(self, kb_files_docs: List[(KnowledgeFile, List[Document])], **kwargs):
+    #     """
+    #     一次上传多个文件
+    #     如果指定了docs，则不再将文本向量化，并将数据库对应条目标为custom_docs=True
+    #     """
+    # all_docs = []
+    # db_datas = []
+    # for kb_file, docs in kb_files_docs:
+    #     if docs:
+    #         custom_docs = True
+    #         for doc in docs:
+    #             doc.metadata.setdefault("source", kb_file.filepath)
+    #     else:
+    #         docs = kb_file.file2text()
+    #         custom_docs = False
+    #     if docs:
+    #         self.delete_doc(kb_file)
+    #         all_docs.extend(docs)
+    #
+    # if all_docs:
+    #     doc_infos = self.do_add_doc(all_docs, **kwargs)
+    #     print(doc_infos)
+    # add_files_to_db()
+    #
+    # return custom_docs, len(docs), doc_infos
+    # TODO 因为需要分上传向量库后的信息上传到数据库，整体上传不太好分辨，暂时不做；可以等以后测试上传速度还是慢的时候优化
 
     def delete_doc(self, kb_file: KnowledgeFile, delete_content: bool = False, **kwargs):
         """
@@ -124,11 +152,11 @@ class KBService(ABC):
         """
         if os.path.exists(kb_file.filepath):
             self.delete_doc(kb_file, **kwargs)
-            return self.add_doc(kb_file, docs=docs, **kwargs)
+        return self.add_doc(kb_file, docs=docs, **kwargs)
 
     def exist_doc(self, file_name: str):
         return file_exists_in_db(KnowledgeFile(knowledge_base_name=self.kb_name,
-                                        filename=file_name))
+                                               filename=file_name))
 
     def list_files(self):
         return list_files_from_db(self.kb_name)
@@ -142,7 +170,23 @@ class KBService(ABC):
                     score_threshold: float = SCORE_THRESHOLD,
                     ):
         embeddings = self._load_embeddings()
-        docs = self.do_search(query, top_k, score_threshold, embeddings)
+        docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold, embeddings=embeddings,
+                              method="cos")
+        rerank_model = self._load_reranks()
+        if not docs:
+            return []
+        document_map = {doc[0].page_content: doc[0] for doc in docs}
+        score_map = {doc[0].page_content: doc[1] for doc in docs}
+        pairs = [[query, doc[0].page_content] for doc in docs]
+        docs = rerank_model.rerank(pairs, top_k)
+        for content, score in docs:
+            print(content, score)
+        docs = rerank_score_process(docs)
+        # for content, score in docs:
+        #     print(content, score)
+        docs = [[document_map.get(doc[0]), score_map.get(doc[0])] for doc in docs]
+        # for content, score in docs:
+        #     print(content, score)
         return docs
 
     def get_doc_by_id(self, id: str) -> Optional[Document]:
@@ -196,7 +240,8 @@ class KBService(ABC):
                   top_k: int,
                   score_threshold: float,
                   embeddings: Embeddings,
-                  ) -> List[Document]:
+                  **kwargs
+                  ) -> List[Tuple[Document, Any]]:
         """
         搜索知识库子类实自己逻辑
         """
@@ -246,6 +291,10 @@ class KBServiceFactory:
             from server.knowledge_base.kb_service.milvus_kb_service import MilvusKBService
             return MilvusKBService(kb_name,
                                    embed_model=embed_model)  # other milvus parameters are set in model_config.kbs_config
+        elif SupportedVSType.ES == vector_store_type:
+            from server.knowledge_base.kb_service.es_kb_service import ESKBService
+            return ESKBService(kb_name,
+                               embed_model=embed_model)
         elif SupportedVSType.DEFAULT == vector_store_type:  # kb_exists of default kbservice is False, to make validation easier.
             from server.knowledge_base.kb_service.default_kb_service import DefaultKBService
             return DefaultKBService(kb_name)
@@ -255,7 +304,7 @@ class KBServiceFactory:
                             ) -> KBService:
         _, vs_type, embed_model = load_kb_from_db(kb_name)
         if vs_type is None and os.path.isdir(get_kb_path(kb_name)):  # faiss knowledge base not in db
-            vs_type = "faiss"
+            vs_type = DEFAULT_VS_TYPE
         return KBServiceFactory.get_service(kb_name, vs_type, embed_model)
 
     @staticmethod
@@ -366,3 +415,7 @@ def score_threshold_process(score_threshold, k, docs):
             if cmp(similarity, score_threshold)
         ]
     return docs[:k]
+
+
+def rerank_score_process(docs):
+    return [doc for doc in docs if doc[1] > 0]

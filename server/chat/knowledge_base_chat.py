@@ -1,7 +1,9 @@
 from fastapi import Body, Request
 from fastapi.responses import StreamingResponse
+from langchain.chat_models import ChatOpenAI
+
 from configs import (LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, TEMPERATURE)
-from server.utils import wrap_done, get_ChatOpenAI
+from server.utils import wrap_done, get_ChatOpenAI, get_model_worker_config, fschat_openai_api_address
 from server.utils import BaseResponse, get_prompt_template
 from langchain.chains import LLMChain
 from langchain.callbacks import AsyncIteratorCallbackHandler
@@ -17,24 +19,27 @@ from server.knowledge_base.kb_doc_api import search_docs
 
 
 async def knowledge_base_chat(query: str = Body(..., description="用户输入", examples=["你好"]),
-                            knowledge_base_name: str = Body(..., description="知识库名称", examples=["samples"]),
-                            top_k: int = Body(VECTOR_SEARCH_TOP_K, description="匹配向量数"),
-                            score_threshold: float = Body(SCORE_THRESHOLD, description="知识库匹配相关度阈值，取值范围在0-1之间，SCORE越小，相关度越高，取到1相当于不筛选，建议设置在0.5左右", ge=0, le=1),
-                            history: List[History] = Body([],
-                                                      description="历史对话",
-                                                      examples=[[
-                                                          {"role": "user",
-                                                           "content": "我们来玩成语接龙，我先来，生龙活虎"},
-                                                          {"role": "assistant",
-                                                           "content": "虎头虎脑"}]]
-                                                      ),
-                            stream: bool = Body(False, description="流式输出"),
-                            model_name: str = Body(LLM_MODEL, description="LLM 模型名称。"),
-                            temperature: float = Body(TEMPERATURE, description="LLM 采样温度", ge=0.0, le=1.0),
-                            prompt_name: str = Body("knowledge_base_chat", description="使用的prompt模板名称(在configs/prompt_config.py中配置)"),
-                            local_doc_url: bool = Body(False, description="知识文件返回本地路径(true)或URL(false)"),
-                            request: Request = None,
-                        ):
+                              knowledge_base_name: str = Body(..., description="知识库名称", examples=["samples"]),
+                              top_k: int = Body(VECTOR_SEARCH_TOP_K, description="匹配向量数"),
+                              score_threshold: float = Body(SCORE_THRESHOLD,
+                                                            description="知识库匹配相关度阈值，取值范围在0-1之间，SCORE越小，相关度越高，取到1相当于不筛选，建议设置在0.5左右",
+                                                            ge=0, le=2),
+                              history: List[History] = Body([],
+                                                            description="历史对话",
+                                                            examples=[[
+                                                                {"role": "user",
+                                                                 "content": "我们来玩成语接龙，我先来，生龙活虎"},
+                                                                {"role": "assistant",
+                                                                 "content": "虎头虎脑"}]]
+                                                            ),
+                              stream: bool = Body(False, description="流式输出"),
+                              model_name: str = Body(LLM_MODEL, description="LLM 模型名称。"),
+                              temperature: float = Body(TEMPERATURE, description="LLM 采样温度", ge=0.0, le=1.0),
+                              prompt_name: str = Body("knowledge_base_chat",
+                                                      description="使用的prompt模板名称(在configs/prompt_config.py中配置)"),
+                              local_doc_url: bool = Body(False, description="知识文件返回本地路径(true)或URL(false)"),
+                              request: Request = None,
+                              ):
     kb = KBServiceFactory.get_service_by_name(knowledge_base_name)
     if kb is None:
         return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
@@ -53,28 +58,27 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
             temperature=temperature,
             callbacks=[callback],
         )
+
+        # 通过先验知识优化query
+        query = enhanceQuery(query=query, history=history)
+        print("query:\n" + query)
+
+        # 召回
         docs = search_docs(query, knowledge_base_name, top_k, score_threshold)
-        context = "\n".join([doc.page_content for doc in docs])
-        print("query:" + query)
-        print("context:" + context)
-        print("history:")
-        for i in history:
-            print(i.content)
+        if docs == None or len(docs) == 0:
+            yield json.dumps({"answer": "抱歉，在知识库中没有找到相关的答案"}, ensure_ascii=False)
+            return
+
+        context = "\n\n".join([os.path.basename(doc.metadata.get("source")) + "\n" + doc.page_content for doc in docs])
+        # print("context:\n" + context)
+        # print("history:\n")
+        # for i in history:
+        #     print(i.content)
         prompt_template = get_prompt_template(prompt_name)
         input_msg = History(role="user", content=prompt_template).to_msg_template(False)
 
         chat_prompt = ChatPromptTemplate.from_messages(
             [i.to_msg_template() for i in history] + [input_msg])
-        # messages = chat_prompt.format_prompt(
-        #     context="Bob",
-        #     question="What is your name?"
-        # )
-        # print("messages:")
-        # print(messages.to_string())
-        # print(ChatPromptTemplate.from_messages([History(role="user", content=PROMPT_TEMPLATE).to_msg_template(False)]).format_prompt(
-        #     context="Bob",
-        #     question="What is your name?").to_string())
-
 
         chain = LLMChain(prompt=chat_prompt, llm=model)
 
@@ -90,7 +94,7 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
             if local_doc_url:
                 url = "file://" + doc.metadata["source"]
             else:
-                parameters = urlencode({"knowledge_base_name": knowledge_base_name, "file_name":filename})
+                parameters = urlencode({"knowledge_base_name": knowledge_base_name, "file_name": filename})
                 url = f"{request.base_url}knowledge_base/download_doc?" + parameters
             text = f"""出处 [{inum + 1}] [{filename}]({url}) \n\n{doc.page_content}\n\n"""
             source_documents.append(text)
@@ -116,3 +120,34 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
                                                           model_name=model_name,
                                                           prompt_name=prompt_name),
                              media_type="text/event-stream")
+
+
+def enhanceQuery(query: str,
+                 history: [History],
+                 model_name: str = LLM_MODEL, ):
+    history = [History.from_data(h) for h in history]
+    # from langchain.text_splitter import RecursiveCharacterTextSplitter
+    # text_splitter = RecursiveCharacterTextSplitter(
+    #     chunk_size=chunk_size,
+    #     chunk_overlap=chunk_overlap
+    # )
+    config = get_model_worker_config(model_name)
+    model = ChatOpenAI(
+        verbose=True,
+        openai_api_key=config.get("api_key", "EMPTY"),
+        openai_api_base=config.get("api_base_url", fschat_openai_api_address()),
+        model_name=model_name,
+        temperature=0,
+        openai_proxy=config.get("openai_proxy")
+    )
+    prompt_template = get_prompt_template("pre_chat")
+    input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+    chat_prompt = ChatPromptTemplate.from_messages(
+        [i.to_msg_template() for i in history] + [input_msg])
+    chain = LLMChain(prompt=chat_prompt, llm=model)
+    from datetime import datetime
+    # 获取当前系统时间
+    current_time = datetime.now()
+    # 打印当前系统时间
+    print(current_time)
+    return chain.run({"question": query, "info": f"现在的时间是{current_time}"})
