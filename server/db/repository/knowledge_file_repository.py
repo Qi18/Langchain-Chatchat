@@ -78,7 +78,6 @@ def list_files_from_db(session, kb_name):
 def add_file_to_db(session,
                    kb_file: KnowledgeFile,
                    docs_count: int = 0,
-                   custom_docs: bool = False,
                    doc_infos: List[str] = [],  # 形式：[{"id": str, "metadata": dict}, ...]
                    ):
     kb = session.query(KnowledgeBaseModel).filter_by(kb_name=kb_file.kb_name).first()
@@ -95,7 +94,6 @@ def add_file_to_db(session,
             existing_file.file_mtime = mtime
             existing_file.file_size = size
             existing_file.docs_count = docs_count
-            existing_file.custom_docs = custom_docs
             existing_file.file_version += 1
         # 否则，添加新文件
         else:
@@ -108,7 +106,6 @@ def add_file_to_db(session,
                 file_mtime=mtime,
                 file_size=size,
                 docs_count=docs_count,
-                custom_docs=custom_docs,
             )
             kb.file_count += 1
             session.add(new_file)
@@ -120,7 +117,7 @@ def add_file_to_db(session,
 def add_files_to_db(session,
                     kb_files: List[KnowledgeFile],
                     kb_data: List,
-                    # 包括docs_count，custom_docs，doc_infos: List[str] = [], # 形式：[{"id": str, "metadata": dict}, ...]
+                    # 包括docs_count，doc_infos: List[str] = [], # 形式：[{"id": str, "metadata": dict}, ...]
                     ):
     kb = session.query(KnowledgeBaseModel).filter_by(kb_name=kb_files[0].kb_name).first()
     if kb:
@@ -137,7 +134,6 @@ def add_files_to_db(session,
                 existing_file.file_mtime = mtime
                 existing_file.file_size = size
                 existing_file.docs_count = kb_data[index]["length_docs"]
-                existing_file.custom_docs = kb_data[index]["custom_docs"]
                 existing_file.file_version += 1
             # 否则，添加新文件
             else:
@@ -150,7 +146,6 @@ def add_files_to_db(session,
                     file_mtime=mtime,
                     file_size=size,
                     docs_count=kb_data[index]["length_docs"],
-                    custom_docs=kb_data[index]["custom_docs"],
                 )
                 kb.file_count += 1
                 session.add(new_file)
@@ -210,12 +205,11 @@ def get_file_detail(session, kb_name: str, filename: str) -> dict:
             "create_time": file.create_time,
             "file_mtime": file.file_mtime,
             "file_size": file.file_size,
-            "custom_docs": file.custom_docs,
             "docs_count": file.docs_count,
         }
     else:
         return {}
 
 if __name__=="__main__":
-    print(get_file_detail(kb_name="习近平重要讲话数据库", filename="人物履历1_summary.md"))
+    print(get_file_detail(kb_name="习近平重要讲话数据库", filename="中国共产主义青年团第十九次全国代表大会在京开幕.txt"))
     # print(delete_kb_from_db("a"))

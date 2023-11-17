@@ -415,13 +415,13 @@ class ApiRequest:
                     file_content = file.read()
                     file_stream = BytesIO(file_content)
                     upload_file = UploadFile(filename=doc['name'] + ".txt", file=file_stream)
-                    from server.knowledge_base.kb_doc_api import upload_docs
-                    upload_docs([upload_file], knowledge_base_name, docs={})
-                    # asyncio.run(upload_doc(upload_file, knowledge_base_name))
+                    from server.knowledge_base.kb_doc_api import upload_files
+                    upload_files([upload_file], knowledge_base_name, docs={})
+                    # asyncio.run((upload_file, knowledge_base_name))
                 else:
                     files = {'files': (doc['name'] + ".txt", file, 'text/plain')}
                     upfiledata = {"knowledge_base_name": knowledge_base_name}
-                    url = self._parse_url("/knowledge_base/upload_docs")
+                    url = self._parse_url("/knowledge_base/upload_files")
                     response = httpx.post(url, files=files, data=upfiledata)
             print(f"{filepath}添加完成")
             os.remove(filepath)
@@ -487,13 +487,13 @@ class ApiRequest:
                         file_content = file.read()
                         file_stream = BytesIO(file_content)
                         upload_file = UploadFile(filename=doc['name'] + ".txt", file=file_stream)
-                        from server.knowledge_base.kb_doc_api import upload_docs
-                        upload_docs([upload_file], knowledge_base_name, docs={})
-                        # asyncio.run(upload_doc(upload_file, knowledge_base_name))
+                        from server.knowledge_base.kb_doc_api import upload_files
+                        upload_files([upload_file], knowledge_base_name, docs={})
+                        # asyncio.run((upload_file, knowledge_base_name))
                     else:
                         files = {'files': (doc['name'] + ".txt", file, 'text/plain')}
                         upfiledata = {"knowledge_base_name": knowledge_base_name}
-                        url = self._parse_url("/knowledge_base/upload_doc")
+                        url = self._parse_url("/knowledge_base/upload_files")
                         response = httpx.post(url, files=files, data=upfiledata)
                 print(f"{filepath}添加完成")
                 os.remove(filepath)
@@ -712,7 +712,7 @@ class ApiRequest:
             no_remote_api: bool = None,
     ):
         '''
-        对应api.py/knowledge_base/upload_docs接口
+        对应api.py/knowledge_base/s接口
         '''
         if no_remote_api is None:
             no_remote_api = self.no_remote_api
@@ -740,7 +740,7 @@ class ApiRequest:
         }
 
         if no_remote_api:
-            from server.knowledge_base.kb_doc_api import upload_docs
+            from server.knowledge_base.kb_doc_api import s
             from fastapi import UploadFile
             from tempfile import SpooledTemporaryFile
 
@@ -751,13 +751,13 @@ class ApiRequest:
                 temp_file.seek(0)
                 upload_files.append(UploadFile(file=temp_file, filename=filename))
 
-            response = upload_docs(upload_files, **data)
+            response = s(upload_files, **data)
             return response.dict()
         else:
             if isinstance(data["docs"], dict):
                 data["docs"] = json.dumps(data["docs"], ensure_ascii=False)
             response = self.post(
-                "/knowledge_base/upload_docs",
+                "/knowledge_base/s",
                 data=data,
                 files=[("files", (filename, file)) for filename, file in files],
             )
@@ -771,7 +771,7 @@ class ApiRequest:
             no_remote_api: bool = None,
     ):
         '''
-        对应api.py/knowledge_base/delete_docs接口
+        对应api.py/knowledge_base/delete_files接口
         '''
         if no_remote_api is None:
             no_remote_api = self.no_remote_api
@@ -784,12 +784,12 @@ class ApiRequest:
         }
 
         if no_remote_api:
-            from server.knowledge_base.kb_doc_api import delete_docs
-            response = delete_docs(**data)
+            from server.knowledge_base.kb_doc_api import delete_files
+            response = delete_files(**data)
             return response.dict()
         else:
             response = self.post(
-                "/knowledge_base/delete_docs",
+                "/knowledge_base/delete_files",
                 json=data,
             )
             return self._check_httpx_json_response(response)
@@ -807,7 +807,7 @@ class ApiRequest:
             no_remote_api: bool = None,
     ):
         '''
-        对应api.py/knowledge_base/update_docs接口
+        对应api.py/knowledge_base/update_files接口
         '''
         if no_remote_api is None:
             no_remote_api = self.no_remote_api
@@ -823,14 +823,14 @@ class ApiRequest:
             "not_refresh_vs_cache": not_refresh_vs_cache,
         }
         if no_remote_api:
-            from server.knowledge_base.kb_doc_api import update_docs
-            response = update_docs(**data)
+            from server.knowledge_base.kb_doc_api import update_files
+            response = update_files(**data)
             return response.dict()
         else:
             if isinstance(data["docs"], dict):
                 data["docs"] = json.dumps(data["docs"], ensure_ascii=False)
             response = self.post(
-                "/knowledge_base/update_docs",
+                "/knowledge_base/update_files",
                 json=data,
             )
             return self._check_httpx_json_response(response)

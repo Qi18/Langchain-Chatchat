@@ -1,6 +1,7 @@
 from fastapi import Body, Request
 from fastapi.responses import StreamingResponse
 from langchain.chat_models import ChatOpenAI
+from langchain.schema import BasePromptTemplate
 
 from configs import (LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, TEMPERATURE)
 from server.utils import wrap_done, get_ChatOpenAI, get_model_worker_config, fschat_openai_api_address
@@ -15,7 +16,7 @@ from server.knowledge_base.kb_service.base import KBService, KBServiceFactory
 import json
 import os
 from urllib.parse import urlencode
-from server.knowledge_base.kb_doc_api import search_docs
+from server.knowledge_base.kb_doc_api import search_docs, search_docs_multiQ
 
 
 async def knowledge_base_chat(query: str = Body(..., description="用户输入", examples=["你好"]),
@@ -59,17 +60,50 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
             callbacks=[callback],
         )
 
-        # 通过先验知识优化query
-        query = enhanceQuery(query=query, history=history)
-        print("query:\n" + query)
+        # 通过历史对话优化query
+        history_query = True
+        if len(history) == 0:
+            history_query = False
+        retry = 3
+        if history_query:
+            new_query = historyQuery(query=query, history=history, model_name=model_name)
+            while retry > 0:
+                try:
+                    query = json.loads(new_query)["question"]
+                    retry = -2
+                except ValueError:
+                    retry -= 1
+                    new_query = historyQuery(query=query, history=history)
 
-        # 召回
-        docs = search_docs(query, knowledge_base_name, top_k, score_threshold)
+        # 通过先验知识优化query
+        multi_query = False
+        retry = 3
+        if multi_query:
+            new_querys = enhanceQuery(query=query, history=history)
+            while retry > 0:
+                try:
+                    json.loads(new_querys)
+                    retry = -2
+                except ValueError:
+                    retry -= 1
+                    new_querys = enhanceQuery(query=query, history=history)
+
+        if retry == -2:
+            print(f"multiquery:{new_querys}")
+            multiquery = [query]
+            multiquery.extend([item["query"] for item in json.loads(new_querys)])
+            docs = search_docs_multiQ(querys=multiquery, knowledge_base_name=knowledge_base_name, top_k=top_k,
+                                      score_threshold=score_threshold, search_method="hybrid")
+        else:
+            print(f"query:{query}")
+            docs = search_docs(query, knowledge_base_name, top_k, score_threshold, search_method="hybrid")
+
         if docs == None or len(docs) == 0:
             yield json.dumps({"answer": "抱歉，在知识库中没有找到相关的答案"}, ensure_ascii=False)
             return
 
-        context = "\n\n".join([os.path.basename(doc.metadata.get("source")) + "\n" + doc.page_content for doc in docs])
+        context = "\n---\n".join(
+            [os.path.basename(doc.metadata.get("source")) + "\n" + doc.page_content for doc in docs])
         # print("context:\n" + context)
         # print("history:\n")
         # for i in history:
@@ -125,29 +159,61 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
 def enhanceQuery(query: str,
                  history: [History],
                  model_name: str = LLM_MODEL, ):
+    from datetime import datetime
+    current_time = datetime.today()
+    info = {"question": query, "info": f"现在的时间是{current_time}", "num": 3}
+    return chatWithHistory(info, "pre_chat", history, model_name=model_name, temperature=0.1)
+
+
+def historyQuery(query: str,
+                 history: [History],
+                 model_name: str = LLM_MODEL, ):
+    info = {"question": query, "chat_history": [i.to_msg_template() for i in history]}
+    return chatOnes(info, "history_enQuery", model_name=model_name, temperature=0.1)
+
+
+def chatWithHistory(info: json,
+                    prompt_name: str,
+                    history: [History],
+                    model_name: str = LLM_MODEL,
+                    temperature: float = TEMPERATURE, ):
     history = [History.from_data(h) for h in history]
-    # from langchain.text_splitter import RecursiveCharacterTextSplitter
-    # text_splitter = RecursiveCharacterTextSplitter(
-    #     chunk_size=chunk_size,
-    #     chunk_overlap=chunk_overlap
-    # )
+    prompt_template = get_prompt_template(prompt_name)
+    input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+    chat_prompt = ChatPromptTemplate.from_messages(
+        [i.to_msg_template() for i in history] + [input_msg])
     config = get_model_worker_config(model_name)
     model = ChatOpenAI(
         verbose=True,
         openai_api_key=config.get("api_key", "EMPTY"),
         openai_api_base=config.get("api_base_url", fschat_openai_api_address()),
         model_name=model_name,
-        temperature=0,
+        temperature=temperature,
         openai_proxy=config.get("openai_proxy")
     )
-    prompt_template = get_prompt_template("pre_chat")
-    input_msg = History(role="user", content=prompt_template).to_msg_template(False)
-    chat_prompt = ChatPromptTemplate.from_messages(
-        [i.to_msg_template() for i in history] + [input_msg])
     chain = LLMChain(prompt=chat_prompt, llm=model)
-    from datetime import datetime
-    # 获取当前系统时间
-    current_time = datetime.now()
-    # 打印当前系统时间
-    print(current_time)
-    return chain.run({"question": query, "info": f"现在的时间是{current_time}"})
+    return chain.run(info)
+
+
+def chatOnes(info: json,
+             prompt_name: str,
+             model_name: str = LLM_MODEL,
+             temperature: float = TEMPERATURE, ):
+    prompt_template = get_prompt_template(prompt_name)
+    input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+    chat_prompt = ChatPromptTemplate.from_messages([input_msg])
+    config = get_model_worker_config(model_name)
+    model = ChatOpenAI(
+        verbose=True,
+        openai_api_key=config.get("api_key", "EMPTY"),
+        openai_api_base=config.get("api_base_url", fschat_openai_api_address()),
+        model_name=model_name,
+        temperature=temperature,
+        openai_proxy=config.get("openai_proxy")
+    )
+    chain = LLMChain(prompt=chat_prompt, llm=model)
+    return chain.run(info)
+
+
+if __name__ == "__main__":
+    print(historyQuery("会议精神", [History(role='user', content='二十大'), History(role='assistant', content='根据已知信息，中国共产党第二十次全国代表大会将于10月16日在北京召开。这次大会是在全党全国各族人民迈上全面建设社会主义现代化国家新征程、向第二个百年奋斗目标进军的关键时刻召开的一次十分重要的大会。大会的主要议题包括认真总结过去5年工作，全面总结新时代以来以习近平同志为核心的党中央团结带领全党全国各族人民坚持和发展中国特色社会主义取得的重大成就和宝贵经验，制定行动纲领和大政方针，动员全党全国各族人民坚定历史自信、增强历史主动，守正创新、勇毅前行，继续统筹推进“五位一体”总体布局、协调推进“四个全面”战略布局，继续扎实推进全体人民共同富裕，继续有力推进党的建设新的伟大工程，继续积极推动构建人类命运共同体。大会将选举产生新一届中央委员会和中央纪律检查委员会。')]))

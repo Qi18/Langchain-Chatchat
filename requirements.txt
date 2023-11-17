@@ -66,5 +66,6 @@ FlagEmbedding
 
 rich
 loguru
+wikipedia
 
 

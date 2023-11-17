@@ -89,51 +89,44 @@ class KBService(ABC):
         status = delete_kb_from_db(self.kb_name)
         return status
 
-    def add_doc(self, kb_file: KnowledgeFile, docs: List[Document] = [], **kwargs):
+    def add_doc(self, kb_file: KnowledgeFile, **kwargs):
         """
         向知识库添加文件
         如果指定了docs，则不再将文本向量化，并将数据库对应条目标为custom_docs=True
         """
-        if docs:
-            custom_docs = True
-            for doc in docs:
-                doc.metadata.setdefault("source", kb_file.filepath)
-        else:
-            docs = kb_file.file2text()
-            custom_docs = False
+        docs = kb_file.file2text()
+        self.delete_doc(kb_file)
+        doc_infos = self.do_add_doc(docs, **kwargs)
+        status = add_file_to_db(kb_file=kb_file, docs_count=len(docs), doc_infos=doc_infos)
+        return status
 
-        if docs:
-            self.delete_doc(kb_file)
-            doc_infos = self.do_add_doc(docs, **kwargs)
-            return custom_docs, len(docs), doc_infos
-        return False, 0, []
+    def add_docs(self, kb_files: List[KnowledgeFile], **kwargs):
+        """
+        一次上传多个文件，为了多文件上传数据加速，请尽量使用这个接口
+        """
+        all_docs = []
+        db_datas = []
 
-    # def add_docs(self, kb_files_docs: List[(KnowledgeFile, List[Document])], **kwargs):
-    #     """
-    #     一次上传多个文件
-    #     如果指定了docs，则不再将文本向量化，并将数据库对应条目标为custom_docs=True
-    #     """
-    # all_docs = []
-    # db_datas = []
-    # for kb_file, docs in kb_files_docs:
-    #     if docs:
-    #         custom_docs = True
-    #         for doc in docs:
-    #             doc.metadata.setdefault("source", kb_file.filepath)
-    #     else:
-    #         docs = kb_file.file2text()
-    #         custom_docs = False
-    #     if docs:
-    #         self.delete_doc(kb_file)
-    #         all_docs.extend(docs)
-    #
-    # if all_docs:
-    #     doc_infos = self.do_add_doc(all_docs, **kwargs)
-    #     print(doc_infos)
-    # add_files_to_db()
-    #
-    # return custom_docs, len(docs), doc_infos
-    # TODO 因为需要分上传向量库后的信息上传到数据库，整体上传不太好分辨，暂时不做；可以等以后测试上传速度还是慢的时候优化
+        for kb_file in kb_files:
+            all_docs.extend(kb_file.file2text())
+        # 将所有的chunk写入向量库
+        doc_infos = self.do_add_doc(all_docs, **kwargs)
+        # chunk 分类
+        db_file_info = {}
+        for item in doc_infos:
+            if item["metadata"]["source"] not in db_file_info:
+                db_file_info[item["metadata"]["source"]] = []
+            db_file_info[item["metadata"]["source"]].append(item)
+        # 根据kb_file排序
+        for kb_file in kb_files:
+            # if db_file_info.get(kb_file.filepath) is None:
+            #     continue
+            db_datas.append(
+                {"length_docs": len(db_file_info[kb_file.filepath]), "doc_infos": db_file_info[kb_file.filepath]})
+        # 整体写入metadata数据库
+        # kb_files和db_datas一一对应
+        status = add_files_to_db(kb_files=kb_files, kb_data=db_datas)
+        return status
 
     def delete_doc(self, kb_file: KnowledgeFile, delete_content: bool = False, **kwargs):
         """
@@ -145,14 +138,20 @@ class KBService(ABC):
             os.remove(kb_file.filepath)
         return status
 
-    def update_doc(self, kb_file: KnowledgeFile, docs: List[Document] = [], **kwargs):
+    def update_doc(self, kb_file: KnowledgeFile, **kwargs):
         """
         使用content中的文件更新向量库
         如果指定了docs，则使用自定义docs，并将数据库对应条目标为custom_docs=True
         """
         if os.path.exists(kb_file.filepath):
             self.delete_doc(kb_file, **kwargs)
-        return self.add_doc(kb_file, docs=docs, **kwargs)
+        return self.add_doc(kb_file, **kwargs)
+
+    def update_docs(self, kb_files: List[KnowledgeFile], **kwargs):
+        for kb_file in kb_files:
+            if os.path.exists(kb_file.filepath):
+                self.delete_doc(kb_file, **kwargs)
+        return self.add_docs(kb_files, **kwargs)
 
     def exist_doc(self, file_name: str):
         return file_exists_in_db(KnowledgeFile(knowledge_base_name=self.kb_name,
@@ -168,16 +167,109 @@ class KBService(ABC):
                     query: str,
                     top_k: int = VECTOR_SEARCH_TOP_K,
                     score_threshold: float = SCORE_THRESHOLD,
+                    search_method: str = "hybrid",
                     ):
         embeddings = self._load_embeddings()
-        docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold, embeddings=embeddings,
-                              method="cos")
         rerank_model = self._load_reranks()
+        docs = []
+        if search_method == "hybrid":
+            docsCos = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+                                     embeddings=embeddings,
+                                     method="cos")
+            docsBM25 = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+                                      embeddings=embeddings,
+                                      method="keywords")
+            docs = docsBM25
+            ## 去重
+            for doc1 in docsCos:
+                append = True
+                for doc2 in docsBM25:
+                    if doc1[0].page_content == doc2[0].page_content:
+                        append = False
+                        break
+                if append:
+                    docs.append(doc1)
+        elif search_method == "cos":
+            docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+                                  embeddings=embeddings,
+                                  method="cos")
+        elif search_method == "keywords":
+            docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+                                  embeddings=embeddings,
+                                  method="keywords")
         if not docs:
             return []
         document_map = {doc[0].page_content: doc[0] for doc in docs}
         score_map = {doc[0].page_content: doc[1] for doc in docs}
         pairs = [[query, doc[0].page_content] for doc in docs]
+        docs = rerank_model.rerank(pairs, top_k)
+        for content, score in docs:
+            print(content, score)
+        docs = rerank_score_process(docs)
+        # for content, score in docs:
+        #     print(content, score)
+        docs = [[document_map.get(doc[0]), score_map.get(doc[0])] for doc in docs]
+        # for content, score in docs:
+        #     print(content, score)
+        return docs
+
+    def search_docs_multiQ(self,
+                           querys: list,  # 第一个是原始query，后面是multiquery
+                           top_k: int = VECTOR_SEARCH_TOP_K,
+                           score_threshold: float = SCORE_THRESHOLD,
+                           search_method: str = "hybrid",
+                           ):
+        print(f"querys:{querys}")
+        if len(querys) == 0:
+            return []
+        embeddings = self._load_embeddings()
+        rerank_model = self._load_reranks()
+        docs = []
+        if search_method == "hybrid":
+            docsCos = self.do_search(query=querys[0], top_k=top_k * 5, score_threshold=score_threshold,
+                                     embeddings=embeddings,
+                                     method="cos")
+            docsBM25 = self.do_search(query=querys[0], top_k=top_k * 5, score_threshold=score_threshold,
+                                      embeddings=embeddings,
+                                      method="keywords")
+            docs = docsCos
+            ## 去重
+            content = set([doc[0].page_content for doc in docs])
+            for new_doc in docsBM25:
+                if new_doc[0].page_content in content:
+                    continue
+                docs.append(new_doc)
+                content.add(new_doc[0].page_content)
+            for query in querys[1:]:
+                for method in ["cos", "keywords"]:
+                    new_docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+                                              embeddings=embeddings,
+                                              method=method)
+                    for new_doc in new_docs:
+                        if new_doc[0].page_content in content:
+                            continue
+                        docs.append(new_doc)
+                        content.add(new_doc[0].page_content)
+
+        elif search_method == "cos" or search_method == "keywords":
+            docs = self.do_search(query=querys[0], top_k=top_k * 5, score_threshold=score_threshold,
+                                  embeddings=embeddings,
+                                  method=search_method)
+            content = set([doc[0].page_content for doc in docs])
+            for query in querys[1:]:
+                new_docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+                                          embeddings=embeddings,
+                                          method=search_method)
+                for new_doc in new_docs:
+                    if new_doc[0].page_content in content:
+                        continue
+                    docs.append(new_doc)
+                    content.add(new_doc[0].page_content)
+        if not docs:
+            return []
+        document_map = {doc[0].page_content: doc[0] for doc in docs}
+        score_map = {doc[0].page_content: doc[1] for doc in docs}
+        pairs = [[querys[0], doc[0].page_content] for doc in docs]
         docs = rerank_model.rerank(pairs, top_k)
         for content, score in docs:
             print(content, score)

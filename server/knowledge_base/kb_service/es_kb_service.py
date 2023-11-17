@@ -54,6 +54,8 @@ class ESKBService(KBService):
             return self.raw_doc_search(query=query, embedding=embeddings, method="knn", top_k=top_k)
         elif kwargs.get("method") == "hybrid":
             return self.raw_doc_search(query=query, embedding=embeddings, method="hybrid", top_k=top_k)
+        elif kwargs.get("method") == "keywords":
+            return self.raw_doc_search(query=query, embedding=embeddings, method="keywords", top_k=top_k)
         else:
             return self.db[0].similarity_search_with_score(query, top_k)
 
@@ -69,7 +71,7 @@ class ESKBService(KBService):
             body={
                 "query": {
                     "term": {
-                        'metadata.source': kb_file.filepath
+                        'metadata.source.keyword': kb_file.filepath
                     }
                 }
             }
@@ -112,6 +114,8 @@ class ESKBService(KBService):
             query_body = generate_hybrid_query(text=query, vec=query_vector, size=top_k)
         elif method == "cos":
             query_body = generate_search_query(vec=query_vector, size=top_k)
+        elif method == "keywords":
+            query_body = generate_keywords_query(text=query, size=top_k)
         else:
             query_body = generate_keywords_query(text=query, size=top_k)
         response = self.client.search(index=self.kb_name, body=query_body)
@@ -136,6 +140,7 @@ class ESKBService(KBService):
             )
         return docs_and_scores
 
+
     def searchAll(self):
         query = {
             "query": {
@@ -150,22 +155,44 @@ class ESKBService(KBService):
         all_indices = self.client.indices.get_alias(index="*")
         print(all_indices)
 
+    def getMapping(self,
+                   index_name):
+        mapping = self.client.indices.get_mapping(index=index_name)
+        print(mapping)
+
     def exist_doc(self, file_name: str):
         query = {
             "query": {
-                "match_phrase": {
-                    "metadata.source": file_name
+                "term": {
+                    "metadata.source.keyword": file_name
                 }
             }
         }
         response = self.client.search(index=self.kb_name, body=query)
+        print(response)
         return response["hits"]["total"]["value"]
 
+    def find_doc(self, kb_file: KnowledgeFile):
+        query = {
+            "query": {
+                "term": {
+                    "metadata.source.keyword": kb_file.filepath
+                }
+            }
+        }
+        response = self.client.search(index=self.kb_name, body=query)
+        hits = [hit for hit in response["hits"]["hits"]]
+        result = []
+        for i in hits:
+            result.append({
+                'content': i['_source']['text'],
+            })
+        return result
 
 if __name__ == "__main__":
     names = ["中国电力企业联合会-电网要闻", "习近平重要讲话数据库"]
     esService = ESKBService(names[1])
     # print(esService.search_docs(query="党的七大什么时间在哪里召开", top_k=10, score_threshold=2))
     # print(esService.searchAll())
-    print(esService.exist_doc("人物履历.md"))
-    # print(esService.doc_search(query="习近平在2017年10月28日干了什么事情", method="knn", top_k=3, knn_boost=0.5))
+    for i in esService.find_doc(kb_file=KnowledgeFile(filename="努力成为可堪大用能担重任的栋梁之才.txt", knowledge_base_name="习近平重要讲话数据库")):
+        print(i)

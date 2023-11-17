@@ -93,7 +93,7 @@ def generate_hybrid_query(text, vec, size) -> Dict:
             "field": "vector",
             "query_vector": vec,
             "k": 10,
-            "num_candidates": 100,
+            "num_candidates": size * 5,
             # "boost": knn_boost
         },
         "size": size,
@@ -115,6 +115,7 @@ def generate_keywords_query(text, size) -> Dict:
         # "rank": {"rrf": {}}
     }
     return query
+
 
 
 es_params = kbs_config["es"]

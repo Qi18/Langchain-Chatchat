@@ -12,11 +12,11 @@ from server.utils import BaseResponse, ListResponse, run_in_thread_pool
 from server.knowledge_base.utils import (validate_kb_name, list_files_from_folder, get_file_path,
                                          files2docs_in_thread, KnowledgeFile)
 from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import Json
+from pydantic import Json, BaseModel
 import json
 from server.knowledge_base.kb_service.base import KBServiceFactory
 from server.db.repository.knowledge_file_repository import get_file_detail, add_files_to_db
-from typing import List, Dict
+from typing import List, Dict, Set
 from langchain.docstore.document import Document
 from server.chat.chat import chat, summaryWithLLM
 
@@ -31,13 +31,30 @@ def search_docs(query: str = Body(..., description="用户输入", examples=["�
                 score_threshold: float = Body(SCORE_THRESHOLD,
                                               description="知识库匹配相关度阈值，取值范围在0-1之间，SCORE越小，相关度越高，取到1相当于不筛选，建议设置在0.5左右",
                                               ge=0, le=1),
+                search_method: str = Body("hybrid", description="搜索方法，可选值为knn, hybrid, cos"),
                 ) -> List[DocumentWithScore]:
     kb = KBServiceFactory.get_service_by_name(knowledge_base_name)
     if kb is None:
         return []
-    docs = kb.search_docs(query, top_k, score_threshold)
+    docs = kb.search_docs(query, top_k, score_threshold, search_method)
     data = [DocumentWithScore(**x[0].dict(), score=x[1]) for x in docs]
 
+    return data
+
+
+def search_docs_multiQ(querys: List = Body(..., description="用户输入", examples=["你好"]),
+                       knowledge_base_name: str = Body(..., description="知识库名称", examples=["samples"]),
+                       top_k: int = Body(VECTOR_SEARCH_TOP_K, description="匹配向量数"),
+                       score_threshold: float = Body(SCORE_THRESHOLD,
+                                                     description="知识库匹配相关度阈值，取值范围在0-1之间，SCORE越小，相关度越高，取到1相当于不筛选，建议设置在0.5左右",
+                                                     ge=0, le=1),
+                       search_method: str = Body("hybrid", description="搜索方法，可选值为knn, hybrid, cos"),
+                       ) -> List[DocumentWithScore]:
+    kb = KBServiceFactory.get_service_by_name(knowledge_base_name)
+    if kb is None or len(querys) == 0:
+        return []
+    docs = kb.search_docs_multiQ(querys, top_k, score_threshold, search_method)
+    data = [DocumentWithScore(**x[0].dict(), score=x[1]) for x in docs]
     return data
 
 
@@ -125,19 +142,17 @@ def _save_files_in_thread(files: List[UploadFile],
 #             yield json.dumps(result, ensure_ascii=False)
 
 
-def upload_docs(files: List[UploadFile] = File(..., description="上传文件，支持多文件"),
-                knowledge_base_name: str = Form(..., description="知识库名称", examples=["samples"]),
-                override: bool = Form(False, description="覆盖已有文件"),
-                to_vector_store: bool = Form(True, description="上传文件后是否进行向量化"),
-                chunk_size: int = Form(CHUNK_SIZE, description="知识库中单段文本最大长度"),
-                chunk_overlap: int = Form(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
-                zh_title_enhance: bool = Form(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
-                docs: Json = Form({}, description="自定义的docs，需要转为json字符串",
-                                  examples=[{"test.txt": [Document(page_content="custom doc")]}]),
-                not_refresh_vs_cache: bool = Form(False, description="暂不保存向量库（用于FAISS）"),
-                use_summary: bool = Form(False, description="用作添加一个总结文档"),
-                use_raw: bool = Form(False, description="是否添加原文档进向量库"),
-                ) -> BaseResponse:
+def upload_files(files: List[UploadFile] = File(..., description="上传文件，支持多文件"),
+                 knowledge_base_name: str = Form(..., description="知识库名称", examples=["samples"]),
+                 override: bool = Form(False, description="覆盖已有文件"),
+                 to_vector_store: bool = Form(True, description="上传文件后是否进行向量化"),
+                 chunk_size: int = Form(CHUNK_SIZE, description="知识库中单段文本最大长度"),
+                 chunk_overlap: int = Form(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
+                 zh_title_enhance: bool = Form(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
+                 not_refresh_vs_cache: bool = Form(False, description="暂不保存向量库（用于FAISS）"),
+                 enhanceOperation: list = Form(["summary"],
+                                               description="额外的增强操作，summary表示在上传时添加一个总结文档"),
+                 ) -> BaseResponse:
     '''
     API接口：上传文件，并/或向量化
     '''
@@ -149,7 +164,7 @@ def upload_docs(files: List[UploadFile] = File(..., description="上传文件，
         return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
 
     failed_files = {}
-    file_names = list(docs.keys())
+    file_names = []
 
     # 先将上传的文件保存到磁盘
     for result in _save_files_in_thread(files, knowledge_base_name=knowledge_base_name, override=override):
@@ -162,17 +177,14 @@ def upload_docs(files: List[UploadFile] = File(..., description="上传文件，
 
     # 对保存的文件进行向量化
     if to_vector_store:
-        result = update_docs(
+        result = update_files(
             knowledge_base_name=knowledge_base_name,
             file_names=file_names,
-            override_custom_docs=True,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             zh_title_enhance=zh_title_enhance,
-            docs=docs,
             not_refresh_vs_cache=True,
-            use_summary=use_summary,
-            use_raw=use_raw
+            enhanceOperation=enhanceOperation
         )
         failed_files.update(result.data["failed_files"])
         if not not_refresh_vs_cache:
@@ -181,11 +193,11 @@ def upload_docs(files: List[UploadFile] = File(..., description="上传文件，
     return BaseResponse(code=200, msg="文件上传与向量化完成", data={"failed_files": failed_files})
 
 
-def delete_docs(knowledge_base_name: str = Body(..., examples=["samples"]),
-                file_names: List[str] = Body(..., examples=[["file_name.md", "test.txt"]]),
-                delete_content: bool = Body(False),
-                not_refresh_vs_cache: bool = Body(False, description="暂不保存向量库（用于FAISS）"),
-                ) -> BaseResponse:
+def delete_files(knowledge_base_name: str = Body(..., examples=["samples"]),
+                 file_names: List[str] = Body(..., examples=[["file_name.md", "test.txt"]]),
+                 delete_content: bool = Body(False),
+                 not_refresh_vs_cache: bool = Body(False, description="暂不保存向量库（用于FAISS）"),
+                 ) -> BaseResponse:
     if not validate_kb_name(knowledge_base_name):
         return BaseResponse(code=403, msg="Don't attack me")
 
@@ -215,18 +227,15 @@ def delete_docs(knowledge_base_name: str = Body(..., examples=["samples"]),
     return BaseResponse(code=200, msg=f"文件删除完成", data={"failed_files": failed_files})
 
 
-def update_docs(
+def update_files(
         knowledge_base_name: str = Body(..., description="知识库名称", examples=["samples"]),
         file_names: List[str] = Body(..., description="文件名称，支持多文件", examples=[["file_name1", "text.txt"]]),
         chunk_size: int = Body(CHUNK_SIZE, description="知识库中单段文本最大长度"),
         chunk_overlap: int = Body(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
         zh_title_enhance: bool = Body(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
-        override_custom_docs: bool = Body(False, description="是否覆盖之前自定义的docs"),
-        docs: Json = Body({}, description="自定义的docs，需要转为json字符串",
-                          examples=[{"test.txt": [Document(page_content="custom doc")]}]),
         not_refresh_vs_cache: bool = Body(False, description="暂不保存向量库（用于FAISS）"),
-        use_summary: bool = Form(False, description="用作添加一个总结文档"),
-        use_raw: bool = Form(False, description="是否添加原文档进向量库"),
+        enhanceOperation: Set[str] = Form(["summary"],
+                                          description="额外的增强操作，summary表示在上传时添加一个总结文档"),
 ) -> BaseResponse:
     '''
     更新知识库文档
@@ -243,100 +252,78 @@ def update_docs(
 
     # 生成需要加载docs的文件列表
     for file_name in file_names:
-        file_detail = get_file_detail(kb_name=knowledge_base_name, filename=file_name)
-        # 如果该文件之前使用了自定义docs，则根据参数决定略过或覆盖
-        if file_detail.get("custom_docs") and not override_custom_docs:
-            continue
-        if file_name not in docs:
-            try:
-                kb_files.append(KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name))
-            except Exception as e:
-                msg = f"加载文档 {file_name} 时出错：{e}"
-                logger.error(f'{e.__class__.__name__}: {msg}',
-                             exc_info=e if log_verbose else None)
-                failed_files[file_name] = msg
-
-    # 从文件生成docs，并进行向量化。
-    # 这里利用了KnowledgeFile的缓存功能，在多线程中加载Document，然后传给KnowledgeFile
-    db_data = []
-    db_files = []
-    for file in kb_files:
-        file.file2text(chunk_size=chunk_size,
-                       chunk_overlap=chunk_overlap,
-                       zh_title_enhance=zh_title_enhance)
-        custom_docs, length_docs, doc_infos = kb.update_doc(file, not_refresh_vs_cache=True)
-        if length_docs != 0:
-            db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
-            db_files.append(file)
-        if use_summary:
-            success, summary_file = summaryFile(
-                file=(file.filename, file.file2full_text()),
-                knowledge_base_name=knowledge_base_name,
-                override=override_custom_docs,
-            )
-            if success:
-                custom_docs, length_docs, doc_infos = kb.update_doc(summary_file, not_refresh_vs_cache=True)
-                if length_docs != 0:
-                    db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
-                    db_files.append(summary_file)
-
-    # for status, result in files2docs_in_thread(kb_files,
-    #                                            chunk_size=chunk_size,
-    #                                            chunk_overlap=chunk_overlap,
-    #                                            zh_title_enhance=zh_title_enhance):
-    #     if status:
-    #         kb_name, file_name, new_docs = result
-    #         kb_file = KnowledgeFile(filename=file_name,
-    #                                 knowledge_base_name=knowledge_base_name)
-    #         kb_file.splited_docs = new_docs
-    #         # 对需要summary的文档进行总结
-    #         if use_summary:
-    #             result = summaryFile(
-    #                 file=(file_name, kb_file.file2text()),
-    #                 knowledge_base_name=knowledge_base_name,
-    #                 override=override_custom_docs,
-    #                 chunk_size=chunk_size,
-    #                 chunk_overlap=chunk_overlap,
-    #                 zh_title_enhance=zh_title_enhance,
-    #                 not_refresh_vs_cache=True,
-    #             )
-    #         if use_raw:
-    #             name = os.path.splitext(file_name)[0]
-    #             suffix = os.path.splitext(file_name)[1]
-    #             kb_file = KnowledgeFile(filename=file_name,
-    #                                     knowledge_base_name=knowledge_base_name)
-    #             kb_file.file2full_text()
-    #             new_kb_file = KnowledgeFile(name + "_raw" + suffix,
-    #                                     knowledge_base_name=knowledge_base_name)
-    #             kb.update_doc(kb_file=new_kb_file, docs=kb_file.full_docs, not_refresh_vs_cache=True)
-    #         kb.update_doc(kb_file, not_refresh_vs_cache=True)
-    #     else:
-    #         kb_name, file_name, error = result
-    #         failed_files[file_name] = error
-
-
-    # 将自定义的docs进行向量化
-    for file_name, v in docs.items():
         try:
-            v = [x if isinstance(x, Document) else Document(**x) for x in v]
-            kb_file = KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name)
-            custom_docs, length_docs, doc_infos = kb.update_doc(kb_file, docs=v, not_refresh_vs_cache=True)
-            if length_docs != 0:
-                db_data.append({"custom_docs": custom_docs, "length_docs": length_docs, "doc_infos": doc_infos})
-                db_files.append(kb_file)
+            kb_file = KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name
+                                    , chunk_overlap=chunk_overlap, chunk_size=chunk_size,
+                                    zh_title_enhance=zh_title_enhance)
+            os.path.getmtime(kb_file.filepath)
+            kb_files.append(kb_file)
         except Exception as e:
-            msg = f"为 {file_name} 添加自定义docs时出错：{e}"
+            msg = f"加载文档 {file_name} 时出错：{e}"
             logger.error(f'{e.__class__.__name__}: {msg}',
                          exc_info=e if log_verbose else None)
             failed_files[file_name] = msg
 
-    ## 将meta信息统一写入数据库
-    add_files_to_db(kb_files=db_files, kb_data=db_data)
+    # 向向量库和metadata数据库添加文件信息
+    kb.update_docs(kb_files)
+
+    # TODO 异步总结所有的file，并上传到向量库和meta数据库
+    if "summary" in enhanceOperation:
+        pass
 
     if not not_refresh_vs_cache:
         kb.save_vector_store()
 
     return BaseResponse(code=200, msg=f"更新文档完成", data={"failed_files": failed_files})
+
+
+def upload_custom_files(
+        files: Json = Form(..., description="自定义的docs，需要转为json字符串",
+                           examples=[{"test.txt": "这个一个自定义的doc"}]),
+        knowledge_base_name: str = Form(..., description="知识库名称", examples=["samples"]),
+        override: bool = Form(False, description="覆盖已有文件"),
+        to_vector_store: bool = Form(True, description="上传文件后是否进行向量化"),
+        chunk_size: int = Form(CHUNK_SIZE, description="知识库中单段文本最大长度"),
+        chunk_overlap: int = Form(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
+        zh_title_enhance: bool = Form(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
+        not_refresh_vs_cache: bool = Form(False, description="暂不保存向量库（用于FAISS）"),
+        enhanceOperation: Set[str] = Form(["summary"],
+                                          description="额外的增强操作，summary表示在上传时添加一个总结文档"),
+) -> BaseResponse:
+    # 上传自定义的files会将files保存为txt文件
+    if not validate_kb_name(knowledge_base_name):
+        return BaseResponse(code=403, msg="Don't attack me")
+
+    kb = KBServiceFactory.get_service_by_name(knowledge_base_name)
+    if kb is None:
+        return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
+
+    failed_files = {}
+    file_names = list(files.keys())
+    final_file_names = []
+
+    # 先将上传的文件保存到磁盘
+    for result in save_custom_files(files=files, knowledge_base_name=knowledge_base_name, override=override):
+        filename = result["data"]["file_name"]
+        if result["code"] != 200:
+            failed_files[filename] = result["msg"]
+        final_file_names.append(str(filename) + ".txt")
+    # 对保存的文件进行向量化
+    if to_vector_store:
+        result = update_files(
+            knowledge_base_name=knowledge_base_name,
+            file_names=final_file_names,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            zh_title_enhance=zh_title_enhance,
+            not_refresh_vs_cache=True,
+            enhanceOperation=enhanceOperation
+        )
+        failed_files.update(result.data["failed_files"])
+        if not not_refresh_vs_cache:
+            kb.save_vector_store()
+
+    return BaseResponse(code=200, msg="文件上传与向量化完成", data={"failed_files": failed_files})
 
 
 def download_doc(
@@ -443,6 +430,33 @@ def recreate_vector_store(
     return StreamingResponse(output(), media_type="text/event-stream")
 
 
+def save_custom_files(files: json, knowledge_base_name: str, override: bool = False) -> list:
+    result = []
+    for filename in files.keys():
+        try:
+            file_path = get_file_path(knowledge_base_name=knowledge_base_name, doc_name=filename + ".txt")
+            data = {"knowledge_base_name": knowledge_base_name, "file_name": filename}
+
+            file_content = files[filename]
+            if (os.path.isfile(file_path)
+                    and not override
+            ):
+                file_status = f"文件 {filename} 已存在。"
+                logger.warn(file_status)
+                result.append(dict(code=404, msg=file_status, data=data))
+                continue
+
+            with open(file_path, "w") as f:
+                f.write(file_content)
+            result.append(dict(code=200, msg=f"成功上传文件 {filename}", data=data))
+        except Exception as e:
+            msg = f"{filename} 文件上传失败，报错信息为: {e}"
+            logger.error(f'{e.__class__.__name__}: {msg}',
+                         exc_info=e if log_verbose else None)
+            result.append(dict(code=500, msg=msg, data=data))
+    return result
+
+
 def summaryFile(
         file: tuple,
         knowledge_base_name: str,
@@ -478,3 +492,5 @@ def summaryFile(
     return True, KnowledgeFile(filename=newfilename, knowledge_base_name=knowledge_base_name)
 
 
+if __name__ == "__main__":
+    upload_custom_files({"test": "a"}, "习近平重要讲话数据库")
