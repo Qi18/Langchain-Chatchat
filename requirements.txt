@@ -67,5 +67,7 @@ FlagEmbedding
 rich
 loguru
 wikipedia
+apscheduler
+pyecharts
 
 

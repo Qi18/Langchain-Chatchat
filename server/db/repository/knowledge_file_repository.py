@@ -211,5 +211,5 @@ def get_file_detail(session, kb_name: str, filename: str) -> dict:
         return {}
 
 if __name__=="__main__":
-    print(get_file_detail(kb_name="习近平重要讲话数据库", filename="中国共产主义青年团第十九次全国代表大会在京开幕.txt"))
+    print(get_file_detail(kb_name="习近平重要讲话数据库", filename="人物履历1_summary.txt"))
     # print(delete_kb_from_db("a"))

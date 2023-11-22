@@ -336,20 +336,6 @@ class KnowledgeFile:
         self.splited_docs = docs
         return self.splited_docs
 
-    def docs2full_texts(self,
-                        docs: List[Document] = None,
-                        refresh: bool = False,
-                        text_splitter: TextSplitter = None,
-                        ):
-        docs = docs or self.file2docs(refresh=refresh)
-        if not docs:
-            return []
-
-        self.full_docs = Document(page_content=''.join(i.page_content for i in docs))
-        if self.zh_title_enhance:
-            self.full_docs = func_zh_title_enhance(self.full_docs)
-        return [self.full_docs]
-
     def file2text(
             self,
             docs: List[Document] = None,
@@ -371,10 +357,8 @@ class KnowledgeFile:
     ):
         if self.full_docs is None or refresh:
             docs = self.file2docs()
-            print(docs)
             if not docs:
-                return []
-
+                return ""
             self.full_docs = Document(page_content=''.join(i.page_content for i in docs))
             if self.zh_title_enhance:
                 self.full_docs = func_zh_title_enhance(self.full_docs)

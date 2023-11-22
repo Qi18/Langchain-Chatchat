@@ -1,3 +1,5 @@
+import json
+
 from fastapi import Body
 from fastapi.responses import StreamingResponse
 from langchain.chat_models import ChatOpenAI
@@ -76,12 +78,12 @@ async def chat(query: str = Body(..., description="用户输入", examples=["恼
 
 
 def chat_local(query: str,
-                history: List[History] = [],
-                model_name: str = LLM_MODEL,
-                temperature: float = TEMPERATURE,
-                chunk_size: int = 1000,
-                chunk_overlap: int = 0
-                ) -> str:
+               history: List[History] = [],
+               model_name: str = LLM_MODEL,
+               temperature: float = TEMPERATURE,
+               chunk_size: int = 1000,
+               chunk_overlap: int = 0
+               ) -> str:
     history = [History.from_data(h) for h in history]
     from langchain.text_splitter import RecursiveCharacterTextSplitter
     text_splitter = RecursiveCharacterTextSplitter(
@@ -104,29 +106,69 @@ def chat_local(query: str,
     chain = LLMChain(prompt=chat_prompt, llm=model)
     return chain.run({"input": query})
 
-def summaryWithLLM(doc: str,
-            model_name: str = LLM_MODEL,
-            temperature: float = TEMPERATURE,
-            chunk_size: int = 2000,
-            chunk_overlap: int = 0
-            ) -> str:
-    # 定义单个文档的总结提示词模板
-    query = doc
-    prompt_template = """总结下文内容:
 
-    {text}
+def chatWithHistory(info: json,
+                    prompt_name: str,
+                    history: [History],
+                    model_name: str = LLM_MODEL,
+                    temperature: float = TEMPERATURE, ):
+    history = [History.from_data(h) for h in history]
+    prompt_template = get_prompt_template(prompt_name)
+    input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+    chat_prompt = ChatPromptTemplate.from_messages(
+        [i.to_msg_template() for i in history] + [input_msg])
+    config = get_model_worker_config(model_name)
+    model = ChatOpenAI(
+        verbose=True,
+        openai_api_key=config.get("api_key", "EMPTY"),
+        openai_api_base=config.get("api_base_url", fschat_openai_api_address()),
+        model_name=model_name,
+        temperature=temperature,
+        openai_proxy=config.get("openai_proxy")
+    )
+    chain = LLMChain(prompt=chat_prompt, llm=model)
+    return chain.run(info)
 
-    总结内容:"""
 
-    PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
+def chatOnes(info: json,
+             prompt_name: str,
+             model_name: str = LLM_MODEL,
+             temperature: float = TEMPERATURE, ):
+    prompt_template = get_prompt_template(prompt_name)
+    input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+    chat_prompt = ChatPromptTemplate.from_messages([input_msg])
+    config = get_model_worker_config(model_name)
+    model = ChatOpenAI(
+        verbose=True,
+        openai_api_key=config.get("api_key", "EMPTY"),
+        openai_api_base=config.get("api_base_url", fschat_openai_api_address()),
+        model_name=model_name,
+        temperature=temperature,
+        openai_proxy=config.get("openai_proxy")
+    )
+    chain = LLMChain(prompt=chat_prompt, llm=model)
+    return chain.run(info)
 
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-    text_splitter = RecursiveCharacterTextSplitter(
+
+def chatRefine(query: str,
+               model_name: str = LLM_MODEL,
+               temperature: float = TEMPERATURE,
+               chunk_size: int = 1000,
+               chunk_overlap: int = 200):
+    from text_splitter import ChineseRecursiveTextSplitter
+    text_splitter = ChineseRecursiveTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap
     )
     split_query = text_splitter.split_text(query)
     docs = [Document(page_content=t) for t in split_query]
+
+    prompt_template = """总结下文内容:
+
+        {text}
+
+        总结内容:"""
+    PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
     config = get_model_worker_config(model_name)
     model = ChatOpenAI(
         verbose=True,
@@ -154,10 +196,9 @@ def summaryWithLLM(doc: str,
     )
     prompt_template = """将下文内容简化概括为大概2000字的简介:
 
-        {text}
+           {text}
 
-        简介:"""
-
+           简介:"""
     COM_PROMPT = PromptTemplate(template=prompt_template, input_variables=["text"])
     from langchain.chains.summarize import load_summarize_chain
     # chain = load_summarize_chain(model, chain_type="map_reduce", return_intermediate_steps=True, verbose=True,
@@ -169,6 +210,7 @@ def summaryWithLLM(doc: str,
     # print(result["output_text"])
     print("\n".join(result["intermediate_steps"]))
     return "\n".join(result["intermediate_steps"])
+
 
 if __name__ == "__main__":
     pass

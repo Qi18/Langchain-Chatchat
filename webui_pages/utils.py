@@ -707,9 +707,9 @@ class ApiRequest:
             chunk_size=CHUNK_SIZE,
             chunk_overlap=OVERLAP_SIZE,
             zh_title_enhance=ZH_TITLE_ENHANCE,
-            docs: Dict = {},
             not_refresh_vs_cache: bool = False,
             no_remote_api: bool = None,
+            enhanceOperation: list =None,
     ):
         '''
         对应api.py/knowledge_base/s接口
@@ -735,8 +735,8 @@ class ApiRequest:
             "chunk_size": chunk_size,
             "chunk_overlap": chunk_overlap,
             "zh_title_enhance": zh_title_enhance,
-            "docs": docs,
             "not_refresh_vs_cache": not_refresh_vs_cache,
+            "enhanceOperation" : enhanceOperation
         }
 
         if no_remote_api:
@@ -754,10 +754,8 @@ class ApiRequest:
             response = s(upload_files, **data)
             return response.dict()
         else:
-            if isinstance(data["docs"], dict):
-                data["docs"] = json.dumps(data["docs"], ensure_ascii=False)
             response = self.post(
-                "/knowledge_base/s",
+                "/knowledge_base/upload_files",
                 data=data,
                 files=[("files", (filename, file)) for filename, file in files],
             )
@@ -802,13 +800,15 @@ class ApiRequest:
             chunk_size=CHUNK_SIZE,
             chunk_overlap=OVERLAP_SIZE,
             zh_title_enhance=ZH_TITLE_ENHANCE,
-            docs: Dict = {},
             not_refresh_vs_cache: bool = False,
             no_remote_api: bool = None,
+            enhanceOperation=None
     ):
         '''
         对应api.py/knowledge_base/update_files接口
         '''
+        if enhanceOperation is None:
+            enhanceOperation = []
         if no_remote_api is None:
             no_remote_api = self.no_remote_api
 
@@ -819,16 +819,14 @@ class ApiRequest:
             "chunk_size": chunk_size,
             "chunk_overlap": chunk_overlap,
             "zh_title_enhance": zh_title_enhance,
-            "docs": docs,
             "not_refresh_vs_cache": not_refresh_vs_cache,
+            "enhanceOperation": enhanceOperation
         }
         if no_remote_api:
             from server.knowledge_base.kb_doc_api import update_files
             response = update_files(**data)
             return response.dict()
         else:
-            if isinstance(data["docs"], dict):
-                data["docs"] = json.dumps(data["docs"], ensure_ascii=False)
             response = self.post(
                 "/knowledge_base/update_files",
                 json=data,

@@ -109,6 +109,8 @@ class KBService(ABC):
 
         for kb_file in kb_files:
             all_docs.extend(kb_file.file2text())
+        if not all_docs:
+            return True
         # 将所有的chunk写入向量库
         doc_infos = self.do_add_doc(all_docs, **kwargs)
         # chunk 分类
@@ -168,15 +170,19 @@ class KBService(ABC):
                     top_k: int = VECTOR_SEARCH_TOP_K,
                     score_threshold: float = SCORE_THRESHOLD,
                     search_method: str = "hybrid",
+                    use_rerank: bool = True,
                     ):
         embeddings = self._load_embeddings()
         rerank_model = self._load_reranks()
         docs = []
+        top_k_1 = top_k * 5 if use_rerank else top_k
+
+        # 召回阶段
         if search_method == "hybrid":
-            docsCos = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+            docsCos = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                      embeddings=embeddings,
                                      method="cos")
-            docsBM25 = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+            docsBM25 = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                       embeddings=embeddings,
                                       method="keywords")
             docs = docsBM25
@@ -190,15 +196,17 @@ class KBService(ABC):
                 if append:
                     docs.append(doc1)
         elif search_method == "cos":
-            docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+            docs = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                   embeddings=embeddings,
                                   method="cos")
         elif search_method == "keywords":
-            docs = self.do_search(query=query, top_k=top_k * 5, score_threshold=score_threshold,
+            docs = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                   embeddings=embeddings,
                                   method="keywords")
-        if not docs:
-            return []
+        if not docs or not use_rerank:
+            return docs[:top_k]
+
+        # 排序阶段
         document_map = {doc[0].page_content: doc[0] for doc in docs}
         score_map = {doc[0].page_content: doc[1] for doc in docs}
         pairs = [[query, doc[0].page_content] for doc in docs]
@@ -206,8 +214,6 @@ class KBService(ABC):
         for content, score in docs:
             print(content, score)
         docs = rerank_score_process(docs)
-        # for content, score in docs:
-        #     print(content, score)
         docs = [[document_map.get(doc[0]), score_map.get(doc[0])] for doc in docs]
         # for content, score in docs:
         #     print(content, score)
@@ -511,3 +517,4 @@ def score_threshold_process(score_threshold, k, docs):
 
 def rerank_score_process(docs):
     return [doc for doc in docs if doc[1] > 0]
+

@@ -194,5 +194,3 @@ if __name__ == "__main__":
     esService = ESKBService(names[1])
     # print(esService.search_docs(query="党的七大什么时间在哪里召开", top_k=10, score_threshold=2))
     # print(esService.searchAll())
-    for i in esService.find_doc(kb_file=KnowledgeFile(filename="努力成为可堪大用能担重任的栋梁之才.txt", knowledge_base_name="习近平重要讲话数据库")):
-        print(i)

@@ -18,7 +18,7 @@ from server.knowledge_base.kb_service.base import KBServiceFactory
 from server.db.repository.knowledge_file_repository import get_file_detail, add_files_to_db
 from typing import List, Dict, Set
 from langchain.docstore.document import Document
-from server.chat.chat import chat, summaryWithLLM
+from server.chat.chat import chatRefine
 
 
 class DocumentWithScore(Document):
@@ -150,8 +150,8 @@ def upload_files(files: List[UploadFile] = File(..., description="上传文件�
                  chunk_overlap: int = Form(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
                  zh_title_enhance: bool = Form(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
                  not_refresh_vs_cache: bool = Form(False, description="暂不保存向量库（用于FAISS）"),
-                 enhanceOperation: list = Form(["summary"],
-                                               description="额外的增强操作，summary表示在上传时添加一个总结文档"),
+                 enhanceOperation: List[str] = Form(None,
+                                                    description="额外的增强操作，summary表示在上传时添加一个总结文档"),
                  ) -> BaseResponse:
     '''
     API接口：上传文件，并/或向量化
@@ -171,7 +171,7 @@ def upload_files(files: List[UploadFile] = File(..., description="上传文件�
         filename = result["data"]["file_name"]
         if result["code"] != 200:
             failed_files[filename] = result["msg"]
-
+            continue
         if filename not in file_names:
             file_names.append(filename)
 
@@ -184,7 +184,7 @@ def upload_files(files: List[UploadFile] = File(..., description="上传文件�
             chunk_overlap=chunk_overlap,
             zh_title_enhance=zh_title_enhance,
             not_refresh_vs_cache=True,
-            enhanceOperation=enhanceOperation
+            enhanceOperation=[] if enhanceOperation is None else enhanceOperation
         )
         failed_files.update(result.data["failed_files"])
         if not not_refresh_vs_cache:
@@ -221,6 +221,19 @@ def delete_files(knowledge_base_name: str = Body(..., examples=["samples"]),
                          exc_info=e if log_verbose else None)
             failed_files[file_name] = msg
 
+        # 对对应的summary文件进行删除
+        summary_file = file_name + "_summary.txt"
+        if not kb.exist_doc(file_name):
+            continue
+        try:
+            kb_file = KnowledgeFile(filename=summary_file,
+                                    knowledge_base_name=knowledge_base_name)
+            kb.delete_doc(kb_file, delete_content, not_refresh_vs_cache=True)
+        except Exception as e:
+            msg = f"{summary_file} 文件删除失败，错误信息：{e}"
+            logger.error(f'{e.__class__.__name__}: {msg}',
+                         exc_info=e if log_verbose else None)
+
     if not not_refresh_vs_cache:
         kb.save_vector_store()
 
@@ -234,12 +247,13 @@ def update_files(
         chunk_overlap: int = Body(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
         zh_title_enhance: bool = Body(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
         not_refresh_vs_cache: bool = Body(False, description="暂不保存向量库（用于FAISS）"),
-        enhanceOperation: Set[str] = Form(["summary"],
-                                          description="额外的增强操作，summary表示在上传时添加一个总结文档"),
+        enhanceOperation: List[str] = Form(None,
+                                           description="额外的增强操作，summary表示在上传时添加一个总结文档", examples=["summary"]),
 ) -> BaseResponse:
     '''
     更新知识库文档
     '''
+    print(enhanceOperation)
     if not validate_kb_name(knowledge_base_name):
         return BaseResponse(code=403, msg="Don't attack me")
 
@@ -256,6 +270,7 @@ def update_files(
             kb_file = KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name
                                     , chunk_overlap=chunk_overlap, chunk_size=chunk_size,
                                     zh_title_enhance=zh_title_enhance)
+            # 判断文件的名字长度是否太长
             os.path.getmtime(kb_file.filepath)
             kb_files.append(kb_file)
         except Exception as e:
@@ -268,8 +283,23 @@ def update_files(
     kb.update_docs(kb_files)
 
     # TODO 异步总结所有的file，并上传到向量库和meta数据库
-    if "summary" in enhanceOperation:
-        pass
+    if enhanceOperation is not None and "summary" in enhanceOperation:
+        # asyncio.run(summary_tasks(kb_files=kb_files, knowledge_base_name=knowledge_base_name))
+        # summary_files = {}
+        for kb_file_group in [kb_files[index: index + 20] for index in range(0, len(kb_files), 20)]:
+            summary_files = {}
+            for kb_file in kb_file_group:
+                if kb_file.file2full_text() is None or kb_file.file2full_text() == "" or len(kb_file.file2text()) < 2:
+                    continue
+                query = f"文章标题是{kb_file.filename}\n文章内容是{kb_file.file2full_text().page_content}"
+                summary = chatRefine(query)
+
+                name = os.path.splitext(kb_file.filename)[0]
+                summary_files[name + "_summary"] = summary
+
+            # summary文档一定会改写之前的文档
+            upload_custom_files(files=summary_files, knowledge_base_name=knowledge_base_name, override=True,
+                                enhanceOperation=[])
 
     if not not_refresh_vs_cache:
         kb.save_vector_store()
@@ -287,8 +317,8 @@ def upload_custom_files(
         chunk_overlap: int = Form(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
         zh_title_enhance: bool = Form(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
         not_refresh_vs_cache: bool = Form(False, description="暂不保存向量库（用于FAISS）"),
-        enhanceOperation: Set[str] = Form(["summary"],
-                                          description="额外的增强操作，summary表示在上传时添加一个总结文档"),
+        enhanceOperation: List[str] = Form(None,
+                                           description="额外的增强操作，summary表示在上传时添加一个总结文档"),
 ) -> BaseResponse:
     # 上传自定义的files会将files保存为txt文件
     if not validate_kb_name(knowledge_base_name):
@@ -307,6 +337,7 @@ def upload_custom_files(
         filename = result["data"]["file_name"]
         if result["code"] != 200:
             failed_files[filename] = result["msg"]
+            continue
         final_file_names.append(str(filename) + ".txt")
     # 对保存的文件进行向量化
     if to_vector_store:
@@ -457,39 +488,45 @@ def save_custom_files(files: json, knowledge_base_name: str, override: bool = Fa
     return result
 
 
-def summaryFile(
-        file: tuple,
-        knowledge_base_name: str,
-        override: bool = False,
-):
-    if not validate_kb_name(knowledge_base_name):
-        return BaseResponse(code=403, msg="Don't attack me")
+async def summary_tasks(kb_files: List[KnowledgeFile],
+                        knowledge_base_name: str, ):
+    tasks = []
+    semaphore = asyncio.Semaphore(4)  # 设置最大并发数量为4
+    fileGroups = [[kb_files[i] for i in range(start, end)] for start, end in
+                  zip(range(0, len(kb_files), 4), range(4, len(kb_files) + 1, 4))]  # file按4的数量分组
+    for fileGroup in fileGroups:
+        task = asyncio.create_task(
+            summary_task(semaphore=semaphore, kb_files=fileGroup, knowledge_base_name=knowledge_base_name))
+        tasks.append(task)
+    await asyncio.gather(*tasks)
 
-    kb = KBServiceFactory.get_service_by_name(knowledge_base_name)
-    if kb is None:
-        return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
-    query = f"文章的标题为：{file[0]}。文章的内容为：{file[1]}"
-    # print(query)
-    summary = summaryWithLLM(doc=query)
-    file_object = BytesIO(summary.encode('utf-8'))
-    name = os.path.splitext(file[0])[0]
-    suffix = os.path.splitext(file[0])[1]
-    newfilename = name + "_summary.txt"
-    UploadFile(filename=newfilename, file=file_object)
 
-    failed_files = {}
-    file_names = []
+async def summary_task(
+        semaphore: asyncio.Semaphore,
+        kb_files: List[KnowledgeFile],
+        knowledge_base_name: str, ):
+    async with semaphore:
+        print("开始执行总结任务")
+        if not validate_kb_name(knowledge_base_name):
+            return BaseResponse(code=403, msg="Don't attack me")
 
-    # 先将上传的文件保存到磁盘
-    for result in _save_files_in_thread([UploadFile(filename=newfilename, file=file_object)],
-                                        knowledge_base_name=knowledge_base_name, override=override):
-        filename = result["data"]["file_name"]
-        if result["code"] != 200:
-            failed_files[filename] = result["msg"]
+        kb = KBServiceFactory.get_service_by_name(knowledge_base_name)
+        if kb is None:
+            return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
+        summary_files = {}
+        for kb_file in kb_files:
+            if kb_file.file2full_text() is None or kb_file.file2full_text() == "":
+                continue
+            query = f"文章标题是{kb_file.filename}\n文章内容是{kb_file.file2full_text()}"
+            summary = chatRefine(query)
 
-    if newfilename in failed_files.keys():
-        return False, None
-    return True, KnowledgeFile(filename=newfilename, knowledge_base_name=knowledge_base_name)
+            name = os.path.splitext(kb_file.filename)[0]
+            summary_files[name + "_summary.txt"] = summary
+
+        # summary文档一定会改写之前的文档
+        upload_custom_files(files=summary_files, knowledge_base_name=knowledge_base_name, override=True,
+                            enhanceOperation=[])
+        print("任务执行完毕")
 
 
 if __name__ == "__main__":

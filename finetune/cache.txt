@@ -1,0 +1,12 @@
+RMM norank cos top1 0.4649122807017544
+RMM norank cos top10 0.5619875514612372
+RMM norank cos top100 0.5687823009576073
+RMM norank keywords top1 0.5157657657657657
+RMM norank keywords top10 0.6191754254254249
+RMM norank keywords top100 0.6243860155686466
+Recall norank cos top1 0.4649122807017544
+Recall norank cos top10 0.7744191559981034
+Recall norank cos top100 0.9221194879089616
+Recall norank keywords top1 0.5157657657657657
+Recall norank keywords top10 0.8295400663821716
+Recall norank keywords top100 0.9439307728781413

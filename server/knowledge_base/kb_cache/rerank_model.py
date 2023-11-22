@@ -22,7 +22,7 @@ class ReRankModel:
         # 设置可见的 GPU 号
         if self.rerank_model is None:
             self.rerank_model = FlagReranker(self.path,
-                                             use_fp16=True)  # Setting use_fp16 to True speeds up computation with a slight performance degradation
+                                             use_fp16=False)  # Setting use_fp16 to True speeds up computation with a slight performance degradation
 
     def rerank(self, pairs, top_k):
         self._load_reranks()
