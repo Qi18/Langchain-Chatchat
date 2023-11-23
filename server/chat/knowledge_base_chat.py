@@ -1,10 +1,15 @@
+import logging
+from datetime import datetime
+import time
+
 from fastapi import Body, Request
 from fastapi.responses import StreamingResponse
+from fastchat.utils import build_logger
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.schema import BasePromptTemplate, Document
 
-from configs import (LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, TEMPERATURE)
+from configs import (LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, TEMPERATURE, LOG_PATH)
 from server.chat.chat import chatWithHistory, chatOnes
 from server.utils import wrap_done, get_ChatOpenAI, get_model_worker_config, fschat_openai_api_address
 from server.utils import BaseResponse, get_prompt_template
@@ -55,6 +60,8 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
                                            model_name: str = LLM_MODEL,
                                            prompt_name: str = prompt_name,
                                            ) -> AsyncIterable[str]:
+        logger = get_logger("chat")
+        start_time = time.time()
         callback = AsyncIteratorCallbackHandler()
         model = get_ChatOpenAI(
             model_name=model_name,
@@ -97,7 +104,8 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
             docs = search_docs_multiQ(querys=multiquery, knowledge_base_name=knowledge_base_name, top_k=top_k,
                                       score_threshold=score_threshold, search_method="hybrid")
         else:
-            print(f"query:{query}")
+            # logger = build_logger("chat", f"{datetime.now().date()}_chat.log")
+            logger.info(f"用户输入：{query}")
             docs = search_docs(query, knowledge_base_name, top_k, score_threshold, search_method="hybrid")
 
         if docs == None or len(docs) == 0:
@@ -149,6 +157,8 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
                              ensure_ascii=False)
 
         await task
+        logger.info(f"chat响应时间: {time.time() - start_time}")
+
 
     return StreamingResponse(knowledge_base_chat_iterator(query=query,
                                                           top_k=top_k,
@@ -173,6 +183,27 @@ def historyQuery(query: str,
     info = {"question": query, "chat_history": [i.to_msg_template() for i in history]}
     return chatOnes(info, "history_enQuery", model_name=model_name, temperature=0.1)
 
+
+def get_logger(name: str):
+    logger = logging.getLogger(name)
+    # 创建一个handler，用于写入日志文件
+    filename = f'{datetime.now().date()}_{name}.log'
+    fh = logging.FileHandler(os.path.join(LOG_PATH, filename), mode='w+', encoding='utf-8')
+    # 再创建一个handler用于输出到控制台
+    ch = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+    logger.setLevel(logging.INFO)
+    # 定义控制台输出层级
+    # logger.setLevel(logging.DEBUG)
+    # 为文件操作符绑定格式（可以绑定多种格式例fh.setFormatter(formatter2)）
+    fh.setFormatter(formatter)
+    # 为控制台操作符绑定格式（可以绑定多种格式例ch.setFormatter(formatter2)）
+    ch.setFormatter(formatter)
+    # 给logger对象绑定文件操作符
+    logger.addHandler(fh)
+    # 给logger对象绑定文件操作符
+    logger.addHandler(ch)
+    return logger
 
 
 if __name__ == "__main__":

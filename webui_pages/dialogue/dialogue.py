@@ -5,7 +5,7 @@ from streamlit_chatbox import *
 from datetime import datetime
 from server.chat.search_engine_chat import SEARCH_ENGINES
 import os
-from configs import LLM_MODEL, TEMPERATURE
+from configs import LLM_MODEL, TEMPERATURE, HISTORY_LEN
 from server.utils import get_model_worker_config
 from typing import List, Dict
 

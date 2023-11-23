@@ -34,7 +34,7 @@ class SupportedVSType:
     MILVUS = 'milvus'
     DEFAULT = 'default'
     PG = 'pg'
-    ES = 'es'
+    ES = 'es_service'
 
 
 class KBService(ABC):
@@ -213,7 +213,7 @@ class KBService(ABC):
         docs = rerank_model.rerank(pairs, top_k)
         for content, score in docs:
             print(content, score)
-        docs = rerank_score_process(docs)
+        # docs = rerank_score_process(docs)
         docs = [[document_map.get(doc[0]), score_map.get(doc[0])] for doc in docs]
         # for content, score in docs:
         #     print(content, score)
@@ -279,7 +279,7 @@ class KBService(ABC):
         docs = rerank_model.rerank(pairs, top_k)
         for content, score in docs:
             print(content, score)
-        docs = rerank_score_process(docs)
+        # docs = rerank_score_process(docs)
         # for content, score in docs:
         #     print(content, score)
         docs = [[document_map.get(doc[0]), score_map.get(doc[0])] for doc in docs]

@@ -7,9 +7,8 @@ from langchain.schema import Document
 from langchain.vectorstores.elasticsearch import ElasticsearchStore
 from loguru import logger
 
-from configs import EMBEDDING_MODEL
-from server.knowledge_base.kb_service.base import KBService, SupportedVSType, score_threshold_process
-from server.knowledge_base.kb_service.es_utils import generate_knn_query, generate_hybrid_query, generate_search_query, \
+from server.knowledge_base.kb_service.base import KBService, SupportedVSType
+from server.knowledge_base.es_service.es_utils import generate_knn_query, generate_hybrid_query, generate_search_query, \
     _default_knn_setting, generate_keywords_query, es_params, host, es_client
 from server.knowledge_base.utils import KnowledgeFile
 from rich import print
@@ -27,8 +26,9 @@ class ESKBService(KBService):
     def do_init(self):
         self.es_params = es_params
         self.host = host
-        self.client = es_client
+        self.client = es_client # Elasticsearch([self.host], http_auth=(self.es_params['user'], self.es_params['password']))
         self.db = []
+        print(self.client)
         embeddings = self._load_embeddings()
         if "bge-" in self.embed_model:
             if "zh" in self.embed_model:

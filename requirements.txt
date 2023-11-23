@@ -57,17 +57,21 @@ transformers_stream_generator==0.0.4
 # elasticsearch==7.9.1
 elasticsearch>=8.8.0
 jieba==0.42.1
-# baichuan模型使用
+# baichuan模型
 # xformers
-# baichuan13B-4bits量化使用
+# baichuan13B-4bits量化
 bitsandbytes==0.41.1
-# bge-rerank使用
+# bge-rerank
 FlagEmbedding
 
 rich
 loguru
-wikipedia
-apscheduler
-pyecharts
+
+# finetune
+wandb
+
+# 时间抽取
+jionlp
+
 
 

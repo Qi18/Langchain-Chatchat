@@ -7,7 +7,6 @@ from configs import (
     DEFAULT_VS_TYPE,
     KB_ROOT_PATH,
     LLM_MODEL,
-    HISTORY_LEN,
     TEMPERATURE,
     SCORE_THRESHOLD,
     CHUNK_SIZE,
@@ -15,17 +14,14 @@ from configs import (
     ZH_TITLE_ENHANCE,
     VECTOR_SEARCH_TOP_K,
     SEARCH_ENGINE_TOP_K,
-    FSCHAT_MODEL_WORKERS,
     HTTPX_DEFAULT_TIMEOUT,
     logger, log_verbose,
 )
 import httpx
-import asyncio
 from server.chat.openai_chat import OpenAiChatMsgIn
 from fastapi.responses import StreamingResponse
 import contextlib
 import json
-import os
 from io import BytesIO
 from server.utils import run_async, iter_over_async, set_httpx_config, api_address, get_httpx_client
 
@@ -34,7 +30,7 @@ import nltk
 
 nltk.data.path = [NLTK_DATA_PATH] + nltk.data.path
 from pprint import pprint
-from es.query_baike import searchRelatedContent
+from server.knowledge_base.es_service.query_baike import searchRelatedContent
 import os
 import asyncio
 

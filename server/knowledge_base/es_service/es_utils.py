@@ -117,7 +117,6 @@ def generate_keywords_query(text, size) -> Dict:
     return query
 
 
-
 es_params = kbs_config["es"]
 host = 'https://{}:{}'.format(es_params['host'], es_params['port'])
 es_client = Elasticsearch([host],
