@@ -62,5 +62,6 @@ def get_kb_detail(session, kb_name: str) -> dict:
         return {}
 
 if __name__=="__main__":
-    print(load_kb_from_db("习近平重要讲话数据库"))
-    # print(delete_kb_from_db("a"))
+    # print(load_kb_from_db("习近平重要讲话数据库"))
+    print(delete_kb_from_db("习近平重要讲话数据库"))
+    # print(get_kb_detail("习近平重要讲话数据库"))

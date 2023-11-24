@@ -10,7 +10,7 @@ from configs import (DEFAULT_VS_TYPE, EMBEDDING_MODEL,
                      logger, log_verbose, )
 from server.utils import BaseResponse, ListResponse, run_in_thread_pool
 from server.knowledge_base.utils import (validate_kb_name, list_files_from_folder, get_file_path,
-                                         files2docs_in_thread, KnowledgeFile)
+                                         files2docs_in_thread, KnowledgeFile, get_kb_path)
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import Json, BaseModel
 import json
@@ -243,6 +243,7 @@ def delete_files(knowledge_base_name: str = Body(..., examples=["samples"]),
 def update_files(
         knowledge_base_name: str = Body(..., description="知识库名称", examples=["samples"]),
         file_names: List[str] = Body(..., description="文件名称，支持多文件", examples=[["file_name1", "text.txt"]]),
+        file_metadata: Json = Body(None, description="文件的metadata，支持多文件", examples=[{"test.txt": {"key1": "value1"}}]),
         chunk_size: int = Body(CHUNK_SIZE, description="知识库中单段文本最大长度"),
         chunk_overlap: int = Body(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
         zh_title_enhance: bool = Body(ZH_TITLE_ENHANCE, description="是否开启中文标题加强"),
@@ -253,7 +254,7 @@ def update_files(
     '''
     更新知识库文档
     '''
-    print(enhanceOperation)
+    print(file_metadata)
     if not validate_kb_name(knowledge_base_name):
         return BaseResponse(code=403, msg="Don't attack me")
 
@@ -267,9 +268,14 @@ def update_files(
     # 生成需要加载docs的文件列表
     for file_name in file_names:
         try:
-            kb_file = KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name
-                                    , chunk_overlap=chunk_overlap, chunk_size=chunk_size,
-                                    zh_title_enhance=zh_title_enhance)
+            if file_metadata and file_name in file_metadata.keys():
+                kb_file = KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name
+                                        , chunk_overlap=chunk_overlap, chunk_size=chunk_size,
+                                        zh_title_enhance=zh_title_enhance, metadata=file_metadata[file_name])
+            else:
+                kb_file = KnowledgeFile(filename=file_name, knowledge_base_name=knowledge_base_name
+                                        , chunk_overlap=chunk_overlap, chunk_size=chunk_size,
+                                        zh_title_enhance=zh_title_enhance)
             # 判断文件的名字长度是否太长
             os.path.getmtime(kb_file.filepath)
             kb_files.append(kb_file)
@@ -309,9 +315,9 @@ def update_files(
 
 def upload_custom_files(
         files: Json = Form(..., description="自定义的docs，需要转为json字符串",
-                           examples=[{"test.txt": "这个一个自定义的doc"}]),
+                           examples=[{"test": {"content":"这个一个自定义的doc", "metadata": {"key1": "value1"}}}]),
         knowledge_base_name: str = Form(..., description="知识库名称", examples=["samples"]),
-        override: bool = Form(False, description="覆盖已有文件"),
+        override: bool = Form(True, description="覆盖已有文件"),
         to_vector_store: bool = Form(True, description="上传文件后是否进行向量化"),
         chunk_size: int = Form(CHUNK_SIZE, description="知识库中单段文本最大长度"),
         chunk_overlap: int = Form(OVERLAP_SIZE, description="知识库中相邻文本重合长度"),
@@ -329,7 +335,6 @@ def upload_custom_files(
         return BaseResponse(code=404, msg=f"未找到知识库 {knowledge_base_name}")
 
     failed_files = {}
-    file_names = list(files.keys())
     final_file_names = []
 
     # 先将上传的文件保存到磁盘
@@ -339,11 +344,17 @@ def upload_custom_files(
             failed_files[filename] = result["msg"]
             continue
         final_file_names.append(str(filename) + ".txt")
-    # 对保存的文件进行向量化
+
+    file_metadata = {}
+    for filename in files.keys():
+        if "metadata" in files[filename].keys() and files[filename]["metadata"]:
+            file_metadata[filename + ".txt"] = files[filename]["metadata"]
+   #对保存的文件进行向量化
     if to_vector_store:
         result = update_files(
             knowledge_base_name=knowledge_base_name,
             file_names=final_file_names,
+            file_metadata=file_metadata,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             zh_title_enhance=zh_title_enhance,
@@ -463,12 +474,16 @@ def recreate_vector_store(
 
 def save_custom_files(files: json, knowledge_base_name: str, override: bool = False) -> list:
     result = []
+    if not os.path.isdir(get_kb_path(knowledge_base_name=knowledge_base_name)):
+        os.mkdir(get_kb_path(knowledge_base_name=knowledge_base_name))
     for filename in files.keys():
         try:
             file_path = get_file_path(knowledge_base_name=knowledge_base_name, doc_name=filename + ".txt")
             data = {"knowledge_base_name": knowledge_base_name, "file_name": filename}
 
-            file_content = files[filename]
+            file_content = files[filename]["content"]
+            if not file_content:
+                continue
             if (os.path.isfile(file_path)
                     and not override
             ):

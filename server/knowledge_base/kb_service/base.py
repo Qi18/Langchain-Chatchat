@@ -27,6 +27,7 @@ from server.knowledge_base.utils import (
 from server.utils import embedding_device, rerank_device
 from typing import List, Union, Dict, Optional, Tuple, Any
 from server.knowledge_base.kb_cache.rerank_model import load_rerank_model, ReRankModel
+from loguru import logger
 
 
 class SupportedVSType:
@@ -34,15 +35,15 @@ class SupportedVSType:
     MILVUS = 'milvus'
     DEFAULT = 'default'
     PG = 'pg'
-    ES = 'es_service'
+    ES = 'es'
 
 
 class KBService(ABC):
 
     def __init__(self,
                  knowledge_base_name: str,
-                 embed_model: str = EMBEDDING_MODEL,
                  rerank_model: str = RERANK_MODEL,
+                 embed_model: str = EMBEDDING_MODEL,
                  ):
         self.kb_name = knowledge_base_name
         self.embed_model = embed_model
@@ -138,6 +139,7 @@ class KBService(ABC):
         status = delete_file_from_db(kb_file)
         if delete_content and os.path.exists(kb_file.filepath):
             os.remove(kb_file.filepath)
+        # logger.info(f"删除文档{self.kb_name}成功")
         return status
 
     def update_doc(self, kb_file: KnowledgeFile, **kwargs):
@@ -203,20 +205,12 @@ class KBService(ABC):
             docs = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                   embeddings=embeddings,
                                   method="keywords")
+        logger.info("召回阶段完成，一共召回了{}个结果".format(len(docs)))
         if not docs or not use_rerank:
             return docs[:top_k]
 
         # 排序阶段
-        document_map = {doc[0].page_content: doc[0] for doc in docs}
-        score_map = {doc[0].page_content: doc[1] for doc in docs}
-        pairs = [[query, doc[0].page_content] for doc in docs]
-        docs = rerank_model.rerank(pairs, top_k)
-        for content, score in docs:
-            print(content, score)
-        # docs = rerank_score_process(docs)
-        docs = [[document_map.get(doc[0]), score_map.get(doc[0])] for doc in docs]
-        # for content, score in docs:
-        #     print(content, score)
+        docs = rerank_model.rerank(docs, query, top_k)
         return docs
 
     def search_docs_multiQ(self,
@@ -273,19 +267,7 @@ class KBService(ABC):
                     content.add(new_doc[0].page_content)
         if not docs:
             return []
-        document_map = {doc[0].page_content: doc[0] for doc in docs}
-        score_map = {doc[0].page_content: doc[1] for doc in docs}
-        pairs = [[querys[0], doc[0].page_content] for doc in docs]
-        docs = rerank_model.rerank(pairs, top_k)
-        for content, score in docs:
-            print(content, score)
-        # docs = rerank_score_process(docs)
-        # for content, score in docs:
-        #     print(content, score)
-        docs = [[document_map.get(doc[0]), score_map.get(doc[0])] for doc in docs]
-        # for content, score in docs:
-        #     print(content, score)
-        return docs
+        return rerank_model.rerank(docs, querys[0], top_k)
 
     def get_doc_by_id(self, id: str) -> Optional[Document]:
         return None
@@ -403,6 +385,7 @@ class KBServiceFactory:
         _, vs_type, embed_model = load_kb_from_db(kb_name)
         if vs_type is None and os.path.isdir(get_kb_path(kb_name)):  # faiss knowledge base not in db
             vs_type = DEFAULT_VS_TYPE
+            embed_model = EMBEDDING_MODEL
         return KBServiceFactory.get_service(kb_name, vs_type, embed_model)
 
     @staticmethod
@@ -440,7 +423,6 @@ def get_kb_details() -> List[Dict]:
     for i, v in enumerate(result.values()):
         v['No'] = i + 1
         data.append(v)
-
     return data
 
 
@@ -517,4 +499,6 @@ def score_threshold_process(score_threshold, k, docs):
 
 def rerank_score_process(docs):
     return [doc for doc in docs if doc[1] > 0]
+
+
 

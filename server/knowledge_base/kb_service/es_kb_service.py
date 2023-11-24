@@ -1,13 +1,15 @@
 import shutil
+import sys
 from typing import Dict, List
 
+sys.path.append("../../../")
 from elasticsearch import Elasticsearch
 from langchain.embeddings.base import Embeddings
 from langchain.schema import Document
 from langchain.vectorstores.elasticsearch import ElasticsearchStore
 from loguru import logger
 
-from server.knowledge_base.kb_service.base import KBService, SupportedVSType
+from server.knowledge_base.kb_service.base import KBService, SupportedVSType, KBServiceFactory
 from server.knowledge_base.es_service.es_utils import generate_knn_query, generate_hybrid_query, generate_search_query, \
     _default_knn_setting, generate_keywords_query, es_params, host, es_client
 from server.knowledge_base.utils import KnowledgeFile
@@ -26,9 +28,8 @@ class ESKBService(KBService):
     def do_init(self):
         self.es_params = es_params
         self.host = host
-        self.client = es_client # Elasticsearch([self.host], http_auth=(self.es_params['user'], self.es_params['password']))
+        self.client = es_client  # Elasticsearch([self.host], http_auth=(self.es_params['user'], self.es_params['password']))
         self.db = []
-        print(self.client)
         embeddings = self._load_embeddings()
         if "bge-" in self.embed_model:
             if "zh" in self.embed_model:
@@ -62,6 +63,7 @@ class ESKBService(KBService):
     def do_add_doc(self, docs: List[Document], **kwargs, ) -> List[Dict]:
         ids = self.db[-1].add_documents(docs)
         doc_infos = [{"id": id, "metadata": doc.metadata} for id, doc in zip(ids, docs)]
+        logger.info(f"添加文档至向量库{self.kb_name}成功")
         return doc_infos
 
     def do_delete_doc(self, kb_file: KnowledgeFile
@@ -76,7 +78,7 @@ class ESKBService(KBService):
                 }
             }
         )
-        print(response)
+        # print(response)
 
     def do_clear_vs(self):
         if self.client.indices.exists(index=self.kb_name):
@@ -140,7 +142,6 @@ class ESKBService(KBService):
             )
         return docs_and_scores
 
-
     def searchAll(self):
         query = {
             "query": {
@@ -189,8 +190,14 @@ class ESKBService(KBService):
             })
         return result
 
+
 if __name__ == "__main__":
     names = ["中国电力企业联合会-电网要闻", "习近平重要讲话数据库"]
+    # esService = KBServiceFactory.get_service_by_name(names[1])
     esService = ESKBService(names[1])
+    # kb_file = KnowledgeFile(filename="习近平复信美中航空遗产基金会主席和飞虎队老兵.txt", knowledge_base_name=names[1]
+    #                         , chunk_overlap=100, chunk_size=400, metadata={"time": 1, "a": 2})
+    # kb_file.file2text()
+    print(esService.searchAll())
     # print(esService.search_docs(query="党的七大什么时间在哪里召开", top_k=10, score_threshold=2))
     # print(esService.searchAll())

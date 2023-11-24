@@ -278,6 +278,7 @@ class KnowledgeFile:
             zh_title_enhance: bool = ZH_TITLE_ENHANCE,
             chunk_size: int = CHUNK_SIZE,
             chunk_overlap: int = OVERLAP_SIZE,
+            metadata: Optional[Dict] = None,
     ):
         '''
         对应知识库目录中的文件，必须是磁盘上存在的才能进行向量化等操作。
@@ -296,6 +297,7 @@ class KnowledgeFile:
         self.zh_title_enhance = zh_title_enhance
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
+        self.metadata = metadata
 
     def file2docs(self, refresh: bool = False):
         try:
@@ -303,6 +305,10 @@ class KnowledgeFile:
                 logger.info(f"{self.document_loader_name} used for {self.filepath}")
                 loader = get_loader(self.document_loader_name, self.filepath)
                 self.docs = loader.load()
+            if self.metadata:
+                for doc in self.docs:
+                    for key in self.metadata.keys():
+                        doc.metadata[key] = self.metadata[key]
             return self.docs
         ##可能会有文件名过长的情况
         except Exception as e:
@@ -330,6 +336,9 @@ class KnowledgeFile:
             else:
                 docs = text_splitter.split_documents(docs)
 
+        # 增加切分信息
+        for doc_id in range(len(docs)):
+            docs[doc_id].metadata["chunk_index"] = doc_id
         print(f"文档切分示例：{docs[0]}")
         if self.zh_title_enhance:
             docs = func_zh_title_enhance(docs)
