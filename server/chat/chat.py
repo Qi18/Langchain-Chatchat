@@ -86,10 +86,6 @@ def chat_local(query: str,
                ) -> str:
     history = [History.from_data(h) for h in history]
     from langchain.text_splitter import RecursiveCharacterTextSplitter
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
-    )
     config = get_model_worker_config(model_name)
     model = ChatOpenAI(
         verbose=True,

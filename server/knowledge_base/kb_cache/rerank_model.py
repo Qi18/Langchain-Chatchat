@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+import numpy as np
+import torch
 from FlagEmbedding import FlagReranker
 from configs import RERANK_MODEL, MODEL_PATH
 from server.utils import rerank_device
@@ -15,7 +17,7 @@ class ReRankModel:
         self.path = MODEL_PATH["rerank_model"][model]
         self.device = device
         self.rerank_model = None
-        self.addition_weight = 0.2
+        self.time_weight = 0.4
         self.model_weight = 1
 
     def _load_reranks(self, model: str = RERANK_MODEL, device: str = rerank_device()):
@@ -23,26 +25,64 @@ class ReRankModel:
             self.rerank_model = FlagReranker(self.path,
                                              use_fp16=False)  # Setting use_fp16 to True speeds up computation with a slight performance degradation
 
-    # 时间权重、模型权重、领域权重共同排序
+    # 时间query,领域知识的考虑
     def rerank(self, docs, query, top_k):
         document_map = {doc[0].page_content: doc[0] for doc in docs}
-        # score_map = {doc[0].page_content: doc[1] for doc in docs} #召回分数
-        score_map = {}
+        rerank_pairs = [(query, doc[0].page_content) for doc in docs]
+        reranked_list = self.rerank_by_model(rerank_pairs)
+        parse_info = jio.ner.extract_time(query, time_base=time.time(), with_parsing=True)
+        if parse_info:
+            logger.info("query带有时间信息")
+            time_docs = []
+            out_time_docs = []
+            for item in reranked_list:
+                model_score = sigmoid(item[1])
+                doc = document_map[item[0]]
+                if "publishTime" in doc.metadata.keys() and doc_in_queryTime(parse_info,
+                                                                             doc.metadata["publishTime"]):
+                    time_docs.append((doc, model_score))
+                else:
+                    out_time_docs.append((doc, model_score))
+            logger.info(f"满足时间的doc个数{len(time_docs)}")
+            out_time_docs = self.domain_sort(out_time_docs)
+            if len(time_docs) < top_k:
+                time_docs.extend(out_time_docs[top_k - len(time_docs):])
+            return time_docs[:top_k]
+        else:
+            logger.info("query不带有时间信息")
+            doc_score = []
+            for item in reranked_list:
+                model_score = sigmoid(item[1])
+                doc = document_map[item[0]]
+                doc_score.append((doc, model_score))
+            doc_score = self.domain_sort(doc_score)
+            return doc_score[:top_k]
+        # doc_score1 = sorted(doc_score, key=lambda x: -x[2])
+        # logger.debug("model排序")
+        # for item in doc_score1[:3]:
+        #     logger.info(item[0])
+        #     logger.info("总:" + str(item[1]))
+        #     logger.info("model:" + str(item[2]))
+        #     logger.info("addition:" + str(item[3]))
+        # doc_score = sorted(doc_score, key=lambda x: -x[1])
+        # logger.debug("总排序")
+        # for item in doc_score[:3]:
+        #     logger.info(item[0])
+        #     logger.info("总:" + str(item[1]))
+        #     logger.info("model:" + str(item[2]))
+        #     logger.info("addition:" + str(item[3]))
+
+    def rerankOnlyModel(self, docs, query, top_k):
+        document_map = {doc[0].page_content: doc[0] for doc in docs}
         rerank_pairs = [(query, doc[0].page_content) for doc in docs]
         reranked_list = self.rerank_by_model(rerank_pairs)
         doc_score = []
         for item in reranked_list:
             model_score = item[1]
             doc = document_map[item[0]]
-            addition_score = cal_score(doc, query)
-            logger.info(f"模型得分{model_score},额外信息得分{addition_score}")
-            doc_score.append((doc,
-                              model_score * self.model_weight + addition_score * self.addition_weight))
-        doc_score = sorted(doc_score, key=lambda x: -x[1])[:top_k]
-        logger.info(f"rerank模型排序完成，共{len(doc_score)}个结果")
-        logger.info(f"tok{top_k}结果为")
-        logger.info(doc_score)
-        return doc_score
+            doc_score.append((doc, sigmoid(model_score)))
+        doc_score = sorted(doc_score, key=lambda x: -x[1])
+        return doc_score[:top_k]
 
     # 使用rerank模型对候选答案进行排序
     def rerank_by_model(self, pairs):
@@ -51,31 +91,86 @@ class ReRankModel:
         sorted_list = sorted(zip([ans[1] for ans in pairs], scores), key=lambda x: -x[1])
         return sorted_list
 
+    def domain_sort(self, doc_score):
+        # 百科排在最前面
+        baike_domain = []
+        other_domain = []
+        for item in doc_score:
+            if "domain" in item[0].metadata.keys() and item[0].metadata["domain"] in ["baike.baidu.com"]:
+                baike_domain.append(item)
+            else:
+                other_domain.append(item)
+        # 剩下的按照时间排序
+        logger.info(f"百科个数{len(baike_domain)}")
+        other_domain = self.time_sort(other_domain)
+        baike_domain.extend(other_domain)
+        return baike_domain
+
+    def time_sort(self, doc_score):
+        # 时间越近越好，加上model的分数
+        ans = []
+        for item in doc_score:
+            if "publishTime" in item[0].metadata.keys():
+                ans.append((item[0], item[1] * self.model_weight + cal_near_time_score(
+                    item[0].metadata["publishTime"]) * self.time_weight))
+            else:
+                ans.append((item[0], item[1] * self.model_weight))
+        logger.info(f"按最近时间+model打分排序{len(ans)}")
+        return sorted(ans, key=lambda x: -x[1])
+
+
+# 保证model预测的值域和addition_score的值域一致
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+
+# 判断doc的时间是否在query的时间范围内
+def doc_in_queryTime(parse_info, timeInfo):
+    timeInfo = timeInfo / 1000
+    for item in parse_info:
+        if item["type"] == "time_span" or item["type"] == "time_point":
+            startTime = time.mktime(time.strptime(item["detail"]["time"][0], "%Y-%m-%d %H:%M:%S"))
+            endTime = time.mktime(time.strptime(item["detail"]["time"][1], "%Y-%m-%d %H:%M:%S"))
+            if startTime <= timeInfo <= endTime:
+                return True
+    return False
+
 
 def cal_score(doc, query):
-    time_weight = 0.5
-    if "domain" in doc.metadata.keys() and doc.metadata["domain"] == "baike.baidu.com":
-        return 1
-    if "domain" in doc.metadata.keys() and "publicTime" in doc.metadata.keys():
-        return cal_time_score(doc.metadata["publicTime"], query) * time_weight + (1 - time_weight) * cal_domain_score(
-            doc.metadata["domain"])
+    time_weight = 0.8
+    if "domain" in doc.metadata.keys() and "publishTime" in doc.metadata.keys():
+        time_score = cal_time_score(doc.metadata["publishTime"], query)
+        domain_score = cal_domain_score(doc.metadata["domain"])
+        # logger.info(f"时间得分{time_score}")
+        # logger.info(f"domain得分{domain_score}")
+        return time_score * time_weight + (1 - time_weight) * domain_score
     elif "domain" not in doc.metadata.keys():
-        return cal_time_score(doc.metadata["publicTime"], query) * time_weight
+        return cal_time_score(doc.metadata["publishTime"], query) * time_weight
     else:
-        return cal_domain_score(doc.metadata["domain"]) + (1 - time_weight)
+        return cal_domain_score(doc.metadata["domain"]) * (1 - time_weight)
+
+
+def cal_near_time_score(timeStamp):
+    assert len(str(timeStamp)) == 13, "时间戳是13位的"
+    timeStamp = timeStamp / 1000
+    time_interval = pow(10, 8)
+    return max(1 - (int(time.time()) - timeStamp) / time_interval, -1)
 
 
 # score都是小于1的
 def cal_time_score(timeStamp, query):
+    # query = query_time_process(query)
     # 给的timeStamp应该是毫秒级的 ，时间戳是13位的
     # TODO 测试时间戳间隔的长度
-    logger.info("时间戳的长度是{}".format(len(str(timeStamp))))
+    # logger.info("时间戳的长度是{}".format(len(str(timeStamp))))
+    assert len(str(timeStamp)) == 13, "时间戳是13位的"
     timeStamp = timeStamp / 1000
+    time_interval = pow(10, 8)
     try:
         timeinfo = jio.parse_time(query, time_base=time.time())
     except Exception as e:
         # 用户query没有时间，按照最近的时间排序
-        return 1 - (int(time.time()) - timeStamp) / pow(10, 8)
+        return max(1 - (int(time.time()) - timeStamp) / time_interval, -1)
     if timeinfo["type"] == "time_span":
         startTime = time.mktime(time.strptime(timeinfo["time"][0], "%Y-%m-%d %H:%M:%S"))
         endTime = time.mktime(time.strptime(timeinfo["time"][1], "%Y-%m-%d %H:%M:%S"))
@@ -83,11 +178,10 @@ def cal_time_score(timeStamp, query):
             if endTime >= timeStamp:
                 return 1
             else:
-                return 1 - (timeStamp - endTime) / pow(10, 8)
+                return -1
         else:
-            return 1 - (startTime - timeStamp) / pow(10, 8)
+            return -1
     elif timeinfo["type"] == "time_point":
-        max_score = 0
         for time_point in timeinfo["time"]:
             # 将时间戳转换为datetime对象
             dt1 = datetime.strptime(time_point, "%Y-%m-%d %H:%M:%S")
@@ -97,11 +191,9 @@ def cal_time_score(timeStamp, query):
             # 检查时间间隔是否不超过一天
             if delta <= timedelta(days=1):
                 return 1
-            else:
-                max_score = max(max_score, 1 - abs(dt1.timestamp() - timeStamp) / pow(10, 8))
-        return max_score
+        return -1
     else:
-        return 1 - (int(time.time()) - timeStamp) / pow(10, 8)
+        return max(1 - (int(time.time()) - timeStamp) / time_interval, -1)
 
 
 def cal_domain_score(domain):
@@ -119,7 +211,4 @@ def load_rerank_model(model: str, device: str):
 
 
 if __name__ == "__main__":
-    # pairs = [['what is panda?', 'hi'], ['what is panda?',
-    #                                     'The giant panda (Ailuropoda melanoleuca), sometimes called a panda bear or simply panda, is a bear species endemic to China.']]
-    # print(ReRankModel().rerank(pairs, 2))
-    print(cal_time_score(1619712000000, "最近一个月习近平去了哪里"))
+    pass

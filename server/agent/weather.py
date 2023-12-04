@@ -77,7 +77,7 @@ def format_weather_data(data):
         # 将预报时间和当前时间的差值添加到输出中
         formatted_data += '预报时间: ' + hours_diff_str + '\n'
         formatted_data += '具体时间: ' + forecast_time_str + '\n'
-        formatted_data += '温度: ' + forecast['temp'] + '°C\n'
+        formatted_data += '温度: ' + forecast['tool'] + '°C\n'
         formatted_data += '天气: ' + forecast['text'] + '\n'
         formatted_data += '风向: ' + forecast['windDir'] + '\n'
         formatted_data += '风速: ' + forecast['windSpeed'] + '级\n'

@@ -108,7 +108,6 @@ class ESKBService(KBService):
                        method: str = "cos",
                        top_k: int = 100,
                        knn_boost: float = 0.5):
-        result = []
         query_vector = embedding.embed_query(query)
         if method == "knn":
             query_body = generate_knn_query(vec=query_vector, size=top_k)
@@ -121,14 +120,6 @@ class ESKBService(KBService):
         else:
             query_body = generate_keywords_query(text=query, size=top_k)
         response = self.client.search(index=self.kb_name, body=query_body)
-        hits = [hit for hit in response["hits"]["hits"]]
-        for i in hits:
-            result.append({
-                'content': i['_source']['text'],
-                'source': i['_source']['metadata']['source'],
-                'score': i['_score']
-            })
-        # print(result)
         docs_and_scores = []
         for hit in response["hits"]["hits"]:
             docs_and_scores.append(
@@ -143,14 +134,29 @@ class ESKBService(KBService):
         return docs_and_scores
 
     def searchAll(self):
-        query = {
-            "query": {
-                "match_all": {}
-            }
-        }
-        response = self.client.search(index=self.kb_name, body=query)
-        # print(response)
-        return response
+        scroll_time = '1m'
+        # 执行初始搜索请求
+        response = self.client.search(index=self.kb_name, scroll=scroll_time, size=1000, body={})
+        ans = []
+        # 获取初始的滚动ID
+        scroll_id = response['_scroll_id']
+        # 遍历所有结果
+        while True:
+            # 处理当前批次的结果
+            for hit in response["hits"]["hits"]:
+                ans.append(
+                    Document(
+                        page_content=hit["_source"]['text'],
+                        metadata=hit["_source"]["metadata"],
+                    ))
+            # 执行下一个滚动请求
+            response = self.client.scroll(scroll_id=scroll_id, scroll=scroll_time)
+            # 检查是否有更多结果
+            if len(response['hits']['hits']) == 0:
+                break
+            # 更新滚动ID
+            scroll_id = response['_scroll_id']
+        return ans
 
     def allIndex(self):
         all_indices = self.client.indices.get_alias(index="*")
@@ -173,13 +179,14 @@ class ESKBService(KBService):
         print(response)
         return response["hits"]["total"]["value"]
 
-    def find_doc(self, kb_file: KnowledgeFile):
+    def find_doc(self, kb_file: KnowledgeFile, size=10):
         query = {
             "query": {
                 "term": {
                     "metadata.source.keyword": kb_file.filepath
                 }
-            }
+            },
+            "size": size
         }
         response = self.client.search(index=self.kb_name, body=query)
         hits = [hit for hit in response["hits"]["hits"]]
@@ -187,17 +194,19 @@ class ESKBService(KBService):
         for i in hits:
             result.append({
                 'content': i['_source']['text'],
+                'metadata': i['_source']["metadata"]
             })
         return result
 
 
 if __name__ == "__main__":
-    names = ["中国电力企业联合会-电网要闻", "习近平重要讲话数据库"]
+    names = ["中国电力企业联合会-电网要闻", "习近平重要讲话数据库", "习近平重要讲话数据库test"]
     # esService = KBServiceFactory.get_service_by_name(names[1])
     esService = ESKBService(names[1])
-    # kb_file = KnowledgeFile(filename="习近平复信美中航空遗产基金会主席和飞虎队老兵.txt", knowledge_base_name=names[1]
-    #                         , chunk_overlap=100, chunk_size=400, metadata={"time": 1, "a": 2})
-    # kb_file.file2text()
-    print(esService.searchAll())
-    # print(esService.search_docs(query="党的七大什么时间在哪里召开", top_k=10, score_threshold=2))
+    # print(esService.searchAll())
+    kb_file = KnowledgeFile(filename="在新时代东北振兴上展现更大担当和作为奋力开创辽宁振兴发展新局面.txt", knowledge_base_name=names[1]
+                            , chunk_overlap=100, chunk_size=500, metadata={"time": 1, "a": 2})
+    # # kb_file.file2text()
+    print(len(esService.find_doc(kb_file=kb_file, size=100)))
+    # print(esService.search_docs(query="十九届六中全会精神", top_k=10, score_threshold=2))
     # print(esService.searchAll())

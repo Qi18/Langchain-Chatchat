@@ -2,6 +2,7 @@ import operator
 from abc import ABC, abstractmethod
 
 import os
+from datetime import datetime
 
 import numpy as np
 from langchain.embeddings.base import Embeddings
@@ -178,7 +179,6 @@ class KBService(ABC):
         rerank_model = self._load_reranks()
         docs = []
         top_k_1 = top_k * 5 if use_rerank else top_k
-
         # 召回阶段
         if search_method == "hybrid":
             docsCos = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
@@ -187,16 +187,20 @@ class KBService(ABC):
             docsBM25 = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                       embeddings=embeddings,
                                       method="keywords")
-            docs = docsBM25
+            docs = []
+            exist_doc = set()
             ## 去重
-            for doc1 in docsCos:
-                append = True
-                for doc2 in docsBM25:
-                    if doc1[0].page_content == doc2[0].page_content:
-                        append = False
-                        break
-                if append:
-                    docs.append(doc1)
+            for doc in docsCos:
+                doc_id = doc[0].metadata["source"] + "_" + str(doc[0].metadata["chunk_index"])
+                if doc_id not in exist_doc:
+                    docs.append(doc)
+                    exist_doc.add(doc_id)
+            for doc in docsBM25:
+                doc_id = doc[0].metadata["source"] + "_" + str(doc[0].metadata["chunk_index"])
+                if doc_id not in exist_doc:
+                    docs.append(doc)
+                    exist_doc.add(doc_id)
+
         elif search_method == "cos":
             docs = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                   embeddings=embeddings,
@@ -206,11 +210,15 @@ class KBService(ABC):
                                   embeddings=embeddings,
                                   method="keywords")
         logger.info("召回阶段完成，一共召回了{}个结果".format(len(docs)))
+        # logger.info("召回结果如下：")
+        # for doc in docs:
+        #     logger.info(doc[0])
+        #     logger.info(doc[1])
         if not docs or not use_rerank:
             return docs[:top_k]
 
         # 排序阶段
-        docs = rerank_model.rerank(docs, query, top_k)
+        docs = rerank_model.rerankOnlyModel(docs, query, top_k)
         return docs
 
     def search_docs_multiQ(self,
@@ -499,6 +507,3 @@ def score_threshold_process(score_threshold, k, docs):
 
 def rerank_score_process(docs):
     return [doc for doc in docs if doc[1] > 0]
-
-
-

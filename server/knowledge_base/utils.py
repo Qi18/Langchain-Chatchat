@@ -339,6 +339,12 @@ class KnowledgeFile:
         # 增加切分信息
         for doc_id in range(len(docs)):
             docs[doc_id].metadata["chunk_index"] = doc_id
+            # if "publishTime" in self.metadata.keys():
+            #     docs[doc_id].page_content = docs[doc_id].page_content + "\n" + "发布时间" + timeStampToTime(self.metadata["publishTime"])
+            # docs[doc_id].page_content = os.path.splitext(self.filename)[0].split("_")[0] + "\n" + docs[doc_id].page_content
+            if "publishTime" in self.metadata.keys():
+                docs[doc_id].page_content = docs[doc_id].page_content + "\n" + "发布时间" + timeStampToTime(self.metadata["publishTime"])
+            docs[doc_id].page_content = docs[doc_id].page_content + "\n" + os.path.splitext(self.filename)[0].split("_")[0]
         print(f"文档切分示例：{docs[0]}")
         if self.zh_title_enhance:
             docs = func_zh_title_enhance(docs)
@@ -430,6 +436,14 @@ def files2docs_in_thread(
         yield result
 
 
+def timeStampToTime(timestamp):
+    if len(str(timestamp)) == 13:
+        timestamp = timestamp / 1000
+    import datetime
+    datetime = datetime.datetime.fromtimestamp(timestamp)
+    return datetime.strftime('%Y年%m月%d日')
+
+
 if __name__ == "__main__":
     from pprint import pprint
 
@@ -442,6 +456,7 @@ if __name__ == "__main__":
     # pprint(docs[-1])
     # from transformers import GPT2TokenizerFast, AutoTokenizer
 
-    # tokenizer = GPT2TokenizerFast.from_pretrained("../../temp/gpt2")
+    # tokenizer = GPT2TokenizerFast.from_pretrained("../../tool/gpt2")
+    # print(timeStampToTime(1609430400000))
     print(os.path.getmtime(
         "/data/lrq/llm/sync/Langchain-Chatchat/knowledge_base/习近平重要讲话数据库/content/中共中央政治局召开会议研究拟提请党的十九届七中全会讨论的文件审议《十九届中央政治局贯彻执行中央八项规定情况报告》《关于党的十九大以来整治形式主义为基层减负工作情况的报告》中共中央总书记习近平主持会议.txt"))
