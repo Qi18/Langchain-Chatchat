@@ -1,7 +1,8 @@
 import json
 import os.path
 import sys
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 sys.path.append("../../")
 import numpy as np
 from matplotlib.font_manager import FontProperties
@@ -23,9 +24,9 @@ def cal_MRR(corpus_datas: list,
     if search_method == "hybrid" and not use_rerank:
         return MRR, Recall
     index = 0
-    for data in tqdm(corpus_datas, desc="语料query", leave=True):
+    for data in tqdm(corpus_datas, desc="语料query", leave=True, position=0):
         docs = esService.search_docs(query=data["query"], top_k=10, search_method=search_method,
-                                     use_rerank=use_rerank)
+                                     use_rerank=use_rerank, test_mode=True)
         index += 1
         for j in range(2):
             for i in range(pow(10, j)):
@@ -37,18 +38,18 @@ def cal_MRR(corpus_datas: list,
                     logger.error(f'{e.__class__.__name__}: {msg}',
                                  exc_info=e if log_verbose else None)
                     continue
-                print(filename)
-                print(chunk_index)
-                print(data["name"])
-                print(int(chunk_index) == int(data["name"].split("__")[1]))
+                # print(filename)
+                # print(chunk_index)
+                # print(data["name"])
+                # print(int(chunk_index) == int(data["name"].split("__")[1]))
                 if filename == data["name"].split("__")[0] and int(chunk_index) == int(data["name"].split("__")[1]):
                     MRR[j] += 1.0 / (i + 1)
                     Recall[j] += 1
                     break
         print(search_method + " " + str(use_rerank) + " MRR 1 " + str(MRR[0] / index) + "\n")
         print(search_method + " " + str(use_rerank) + " MRR 10 " + str(MRR[1] / index) + "\n")
-        print(search_method + " " + str(use_rerank) + " Recall 1 " + str(Recall[0] / index) + "\n")
-        print(search_method + " " + str(use_rerank) + " Recall 10 " + str(Recall[1] / index) + "\n")
+        # print(search_method + " " + str(use_rerank) + " Recall 1 " + str(Recall[0] / index) + "\n")
+        # print(search_method + " " + str(use_rerank) + " Recall 10 " + str(Recall[1] / index) + "\n")
 
     MRR = [item / len(corpus_datas) for item in MRR]
     Recall = [item / len(corpus_datas) for item in Recall]
@@ -109,12 +110,17 @@ if __name__ == "__main__":
     file.close()
     # corpus_datas = corpus_datas[:10]
 
+    with open("./cache.txt", "r+") as file:
+        data = file.readlines()
     search_method = ["cos", "keywords", "hybrid"]
-    for i in tqdm(search_method, desc="search方法"):
-        MRR_value, Recall_value = cal_MRR(corpus_datas, esService, search_method=i, use_rerank=False)
-        with open("./cache.txt", "a+") as file:
-            file.write(i + "\t" + "norank" + "\t" + "\t".join([str(a) for a in MRR_value]) + "\n")
-        MRR_value, Recall_value = cal_MRR(corpus_datas, esService, search_method=i, use_rerank=True)
-        with open("./cache.txt", "a+") as file:
-            file.write(
-                i + "\t" + "rank" + "\t" + "\t".join([str(a) for a in MRR_value]) + "\n")
+    proc = set(item.split("\t")[0] + "_" + item.split("\t")[1] for item in data)
+    for i in search_method:
+        if i + "_" + "norank" not in proc:
+            MRR_value, Recall_value = cal_MRR(corpus_datas, esService, search_method=i, use_rerank=False)
+            with open("./cache.txt", "a+") as file:
+                file.write(i + "\t" + "norank" + "\t" + "\t".join([str(a) for a in MRR_value]) + "\n")
+        if i + "_" + "rank" not in proc:
+            MRR_value, Recall_value = cal_MRR(corpus_datas, esService, search_method=i, use_rerank=True)
+            with open("./cache.txt", "a+") as file:
+                file.write(
+                    i + "\t" + "rank" + "\t" + "\t".join([str(a) for a in MRR_value]) + "\n")

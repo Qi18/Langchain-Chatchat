@@ -1,5 +1,6 @@
-
 import streamlit as st
+
+from server.query_process.query_analysis import query_ir
 from webui_pages.utils import *
 from streamlit_chatbox import *
 from datetime import datetime
@@ -29,10 +30,13 @@ def get_messages_history(history_len: int, content_in_expander: bool = False) ->
             content = [x for x in content if not x._in_expander]
         content = [x.content for x in content]
 
+        print(content)
+
         return {
             "role": msg["role"],
             "content": "\n\n".join(content),
         }
+
     if history_len == 0:
         return []
 
@@ -57,10 +61,11 @@ def dialogue_page(api: ApiRequest):
         dialogue_mode = st.selectbox("请选择对话模式：",
                                      ["LLM 对话",
                                       "知识库问答",
-                                      "搜索引擎问答",
-                                      "自定义Agent问答",
+                                      "分析问答",
+                                      # "搜索引擎问答",
+                                      # "自定义Agent问答",
                                       ],
-                                     index=1,
+                                     index=2,
                                      on_change=on_mode_change,
                                      key="dialogue_mode",
                                      )
@@ -112,7 +117,7 @@ def dialogue_page(api: ApiRequest):
         def on_kb_change():
             st.toast(f"已加载知识库： {st.session_state.selected_kb}")
 
-        if dialogue_mode == "知识库问答":
+        if dialogue_mode == "知识库问答" or dialogue_mode == "分析问答":
             with st.expander("知识库配置", True):
                 kb_list = api.list_knowledge_bases(no_remote_api=True)
                 selected_kb = st.selectbox(
@@ -124,7 +129,8 @@ def dialogue_page(api: ApiRequest):
                 kb_top_k = st.number_input("匹配知识条数：", 1, 20, VECTOR_SEARCH_TOP_K)
 
                 ## Bge 模型会超过1
-                score_threshold = st.slider("知识匹配分数阈值：", 0.0, 2.0, float(SCORE_THRESHOLD), 0.01)
+                # score_threshold = st.slider("知识匹配分数阈值：", 0.0, 2.0, float(SCORE_THRESHOLD), 0.01)
+                score_threshold = 2.0
                 isUseESQuery = st.checkbox('是否确认选择百科参考')
                 # chunk_content = st.checkbox("关联上下文", False, disabled=True)
                 # chunk_size = st.slider("关联长度：", 0, 500, 250, disabled=True)
@@ -145,9 +151,9 @@ def dialogue_page(api: ApiRequest):
     chat_input_placeholder = "请输入对话内容，换行请使用Shift+Enter "
 
     if prompt := st.chat_input(chat_input_placeholder, key="prompt"):
-        print(history_len)
+        # print(history_len)
         history = get_messages_history(history_len)
-        print(history)
+        # print(history)
         chat_box.user_say(prompt)
         if dialogue_mode == "LLM 对话":
             chat_box.ai_say("正在思考...")
@@ -162,30 +168,30 @@ def dialogue_page(api: ApiRequest):
             chat_box.update_msg(text, streaming=False)  # 更新最终的字符串，去除光标
 
 
-        elif dialogue_mode == "自定义Agent问答":
-            chat_box.ai_say([
-                f"正在思考和寻找工具 ...",])
-            text = ""
-            element_index = 0
-            for d in api.agent_chat(prompt,
-                                    history=history,
-                                    model=llm_model,
-                                    temperature=temperature):
-                try:
-                    d = json.loads(d)
-                except:
-                    pass
-                if error_msg := check_error_msg(d):  # check whether error occured
-                    st.error(error_msg)
-
-                elif chunk := d.get("answer"):
-                    text += chunk
-                    chat_box.update_msg(text, element_index=0)
-                elif chunk := d.get("tools"):
-                    element_index += 1
-                    chat_box.insert_msg(Markdown("...", in_expander=True, title="使用工具...", state="complete"))
-                    chat_box.update_msg("\n\n".join(d.get("tools", [])), element_index=element_index, streaming=False)
-            chat_box.update_msg(text, element_index=0, streaming=False)
+        # elif dialogue_mode == "自定义Agent问答":
+        #     chat_box.ai_say([
+        #         f"正在思考和寻找工具 ...",])
+        #     text = ""
+        #     element_index = 0
+        #     for d in api.agent_chat(prompt,
+        #                             history=history,
+        #                             model=llm_model,
+        #                             temperature=temperature):
+        #         try:
+        #             d = json.loads(d)
+        #         except:
+        #             pass
+        #         if error_msg := check_error_msg(d):  # check whether error occured
+        #             st.error(error_msg)
+        #
+        #         elif chunk := d.get("answer"):
+        #             text += chunk
+        #             chat_box.update_msg(text, element_index=0)
+        #         elif chunk := d.get("tools"):
+        #             element_index += 1
+        #             chat_box.insert_msg(Markdown("...", in_expander=True, title="使用工具...", state="complete"))
+        #             chat_box.update_msg("\n\n".join(d.get("tools", [])), element_index=element_index, streaming=False)
+        #     chat_box.update_msg(text, element_index=0, streaming=False)
         elif dialogue_mode == "知识库问答":
             chat_box.ai_say([
                 f"正在查询知识库 `{selected_kb}` ...",
@@ -205,7 +211,7 @@ def dialogue_page(api: ApiRequest):
                                              history=history,
                                              model=llm_model,
                                              temperature=temperature,
-                                             is_use_esQuery=isUseESQuery):
+                                             ):
                 if error_msg := check_error_msg(d):  # check whether error occured
                     st.error(error_msg)
                 elif chunk := d.get("answer"):
@@ -213,25 +219,63 @@ def dialogue_page(api: ApiRequest):
                     chat_box.update_msg(text, element_index=0)
             chat_box.update_msg(text, element_index=0, streaming=False)
             chat_box.update_msg("\n\n".join(d.get("docs", [])), element_index=1, streaming=False)
-        elif dialogue_mode == "搜索引擎问答":
-            chat_box.ai_say([
-                f"正在执行 `{search_engine}` 搜索...",
-                Markdown("...", in_expander=True, title="网络搜索结果", state="complete"),
-            ])
+        elif dialogue_mode == "分析问答":
+            intent = query_ir(prompt)
+            # intent = api.ir_query(prompt)
+            if intent == "query" or intent == "hint_query":
+                # chat_box.insert_msg("(查询意图)")
+                chat_box.ai_say([
+                    f"正在查询知识库 `{selected_kb}` ...",
+                    Markdown("...", in_expander=True, title="知识库匹配结果", state="complete"),
+                ])
+            elif intent == "chat" or intent == "hint_chat":
+                # chat_box.insert_msg("(聊天意图)")
+                chat_box.ai_say([
+                    "正在生成回答",
+                    Markdown('<span style="color:gray">聊天意图</span>')
+                ])
             text = ""
-            for d in api.search_engine_chat(prompt,
-                                            search_engine_name=search_engine,
-                                            top_k=se_top_k,
-                                            history=history,
-                                            model=llm_model,
-                                            temperature=temperature):
+            if isUseESQuery:
+                # chat_box.ai_say([
+                #     f"正在查询wiki知识库 ...",
+                #     Markdown("...", in_expander=True, title="知识库匹配结果"),
+                # ])
+                api.knowledge_wiki_upload(query=prompt, knowledge_base_name=selected_kb)
+            for d in api.analysis_chat(prompt,
+                                       knowledge_base_name=selected_kb,
+                                       top_k=kb_top_k,
+                                       score_threshold=score_threshold,
+                                       history=history,
+                                       model=llm_model,
+                                       temperature=temperature,
+                                       ):
                 if error_msg := check_error_msg(d):  # check whether error occured
                     st.error(error_msg)
                 elif chunk := d.get("answer"):
                     text += chunk
                     chat_box.update_msg(text, element_index=0)
             chat_box.update_msg(text, element_index=0, streaming=False)
-            chat_box.update_msg("\n\n".join(d.get("docs", [])), element_index=1, streaming=False)
+            if intent == "query" or intent == "hint_query":
+                chat_box.update_msg("\n\n".join(d.get("docs", [])), element_index=1, streaming=False)
+        # elif dialogue_mode == "搜索引擎问答":
+        #     chat_box.ai_say([
+        #         f"正在执行 `{search_engine}` 搜索...",
+        #         Markdown("...", in_expander=True, title="网络搜索结果", state="complete"),
+        #     ])
+        #     text = ""
+        #     for d in api.search_engine_chat(prompt,
+        #                                     search_engine_name=search_engine,
+        #                                     top_k=se_top_k,
+        #                                     history=history,
+        #                                     model=llm_model,
+        #                                     temperature=temperature):
+        #         if error_msg := check_error_msg(d):  # check whether error occured
+        #             st.error(error_msg)
+        #         elif chunk := d.get("answer"):
+        #             text += chunk
+        #             chat_box.update_msg(text, element_index=0)
+        #     chat_box.update_msg(text, element_index=0, streaming=False)
+        #     chat_box.update_msg("\n\n".join(d.get("docs", [])), element_index=1, streaming=False)
 
     now = datetime.now()
     with st.sidebar:

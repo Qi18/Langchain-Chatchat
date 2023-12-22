@@ -17,7 +17,7 @@ class ReRankModel:
         self.path = MODEL_PATH["rerank_model"][model]
         self.device = device
         self.rerank_model = None
-        self.time_weight = 0.4
+        self.time_weight = 0.1
         self.model_weight = 1
 
     def _load_reranks(self, model: str = RERANK_MODEL, device: str = rerank_device()):
@@ -44,7 +44,11 @@ class ReRankModel:
                 else:
                     out_time_docs.append((doc, model_score))
             logger.info(f"满足时间的doc个数{len(time_docs)}")
-            out_time_docs = self.domain_sort(out_time_docs)
+            # print(time_docs)
+            for item in time_docs:
+                print(item[0].page_content + "\n" + str(item[1]))
+            # out_time_docs = self.domain_sort(out_time_docs)
+            out_time_docs = self.time_sort(out_time_docs)
             if len(time_docs) < top_k:
                 time_docs.extend(out_time_docs[top_k - len(time_docs):])
             return time_docs[:top_k]
@@ -55,7 +59,10 @@ class ReRankModel:
                 model_score = sigmoid(item[1])
                 doc = document_map[item[0]]
                 doc_score.append((doc, model_score))
-            doc_score = self.domain_sort(doc_score)
+            # doc_score = self.domain_sort(doc_score)
+            doc_score = self.time_sort(doc_score)
+            for item in doc_score:
+                print(item[0].page_content + "\n" + str(item[1]))
             return doc_score[:top_k]
         # doc_score1 = sorted(doc_score, key=lambda x: -x[2])
         # logger.debug("model排序")
@@ -75,6 +82,8 @@ class ReRankModel:
     def rerankOnlyModel(self, docs, query, top_k):
         document_map = {doc[0].page_content: doc[0] for doc in docs}
         rerank_pairs = [(query, doc[0].page_content) for doc in docs]
+        print(len(rerank_pairs))
+        print(rerank_pairs[0])
         reranked_list = self.rerank_by_model(rerank_pairs)
         doc_score = []
         for item in reranked_list:
@@ -88,6 +97,9 @@ class ReRankModel:
     def rerank_by_model(self, pairs):
         self._load_reranks()
         scores = self.rerank_model.compute_score(pairs)
+        if isinstance(scores, float):
+            assert len(pairs) == 1
+            return [(pairs[0][1], scores)]
         sorted_list = sorted(zip([ans[1] for ans in pairs], scores), key=lambda x: -x[1])
         return sorted_list
 
@@ -135,7 +147,14 @@ def doc_in_queryTime(parse_info, timeInfo):
                 return True
     return False
 
+def cal_near_time_score(timeStamp):
+    assert len(str(timeStamp)) == 13, "时间戳是13位的"
+    timeStamp = timeStamp / 1000
+    time_interval = pow(10, 8)
+    return max(1 - (int(time.time()) - timeStamp) / time_interval, -1)
 
+
+# 计算所有权重的逻辑，现已经不用
 def cal_score(doc, query):
     time_weight = 0.8
     if "domain" in doc.metadata.keys() and "publishTime" in doc.metadata.keys():
@@ -148,13 +167,6 @@ def cal_score(doc, query):
         return cal_time_score(doc.metadata["publishTime"], query) * time_weight
     else:
         return cal_domain_score(doc.metadata["domain"]) * (1 - time_weight)
-
-
-def cal_near_time_score(timeStamp):
-    assert len(str(timeStamp)) == 13, "时间戳是13位的"
-    timeStamp = timeStamp / 1000
-    time_interval = pow(10, 8)
-    return max(1 - (int(time.time()) - timeStamp) / time_interval, -1)
 
 
 # score都是小于1的
@@ -205,10 +217,12 @@ modelPool = {}
 
 
 def load_rerank_model(model: str, device: str):
-    if str not in modelPool.keys():
-        modelPool[str] = ReRankModel(model, device)
-    return modelPool[str]
+    if model not in modelPool.keys():
+        # print(f"load rerank model {model}")
+        modelPool[model] = ReRankModel(model, device)
+    return modelPool[model]
 
 
 if __name__ == "__main__":
-    pass
+    pairs = ("What is the name of the Communist Party's eighth national congress?", '国际数据管理协会（DAMA）给出的定义：数据治理是对数据资产管理行使权力和控制的活动集合。 国际数据治理研究所（DGI）给出的定义：数据治理是一个通过一系列信息相关的过程来实现决策权和职责分工的系统，这些过程按照达成共识的模型来执行，该模型描述了谁（Who）能根据什么信息，在什么时间（When）和情况（Where）下，用什么方法（How），采取什么行动（What）。\n数据治理')
+    print(ReRankModel().rerank_by_model([pairs]))

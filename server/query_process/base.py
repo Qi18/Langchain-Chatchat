@@ -8,6 +8,7 @@ from configs import LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, LOG_PATH
 from server.chat.chat import chatWithHistory, chatOnes
 from server.chat.utils import History
 from server.knowledge_base.kb_doc_api import search_docs_multiQ, search_docs
+from server.query_process.query_analysis import query_ner
 
 
 def get_logger(name: str):
@@ -46,6 +47,7 @@ def enhance_query_search(query: str,
     logger.info(f"用户输入：{query}")
     # 优化query中的时间信息
     query = query_time_process(query)
+    logger.info(f"时间优化后的query：{query}")
     # 通过历史对话优化query
     if len(history) == 0:
         history_query = False
@@ -105,6 +107,16 @@ def query_time_process(query: str):
     import jionlp as jio
     import time
     from datetime import datetime
+
+    entity = query_ner(query)
+    logger.info(f"query_ner:{entity}")
+    for item in entity:
+        if item["entity"] == "DATE":
+            if item["words"] in ["近些时间", "近期", "最近", "近些时间内", "最近一段时间", "最近一段时间内", "近来",
+                                 "近些日子", "近些日子内", ]:
+                query = query.replace(item["words"], "近一个月")
+            elif item["words"] in ["近几年来", "最近几年"]:
+                query = query.replace(item["words"], "近两年")
     # filepath = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "tool", "timewords")
     # with open(filepath, "r", encoding="utf-8") as f:
     #     time_words = f.readlines()
@@ -129,6 +141,7 @@ def query_time_process(query: str):
     # print(query)
     return query
 
-if __name__ =="__main__":
+
+if __name__ == "__main__":
     query = "2023年12月04日习近平去了哪里"
     print(query_time_process(query))

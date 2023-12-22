@@ -1,38 +1,55 @@
 import json
-from server.knowledge_base.kb_service.es_kb_service import ESKBService
-from server.knowledge_base.utils import KnowledgeFile
-
-esService = ESKBService("习近平重要讲话数据库")
-
-
-def data_change():
-    origin_file = "corpus.jsonl"
-    with open(origin_file, "r") as file:
-        lines = file.readlines()
-    ans = []
-    file = open("toy_finetune_data.jsonl", "w+")
-    for line in lines:
-        res = {}
-        data = json.loads(line)
-        res["query"] = data["query"]
-        res["pos"] = [query_es(data["name"])]
-        res["neg"] = []
-        ans.append(res)
-        if len(ans) > 500:
-            file.write('\n'.join([json.dumps(item, ensure_ascii=False) for item in ans]) + '\n')
-            ans = []
-    if len(ans) != 0:
-        with open("toy_finetune_data.jsonl", "a+") as file:
-            file.write('\n'.join([json.dumps(item, ensure_ascii=False) for item in ans]) + '\n')
+import os
+import sys
+sys.path.append("../../")
+# from server.chat.chat import chat_local
+# from server.knowledge_base.kb_service.es_kb_service import ESKBService
+# from server.knowledge_base.utils import KnowledgeFile
 
 
-def query_es(name):
-    infos = esService.find_doc(kb_file=KnowledgeFile(filename=name.split("_")[0], knowledge_base_name="习近平重要讲话数据库"), size=max(10000, int(name.split("__")[1])))
-    for info in infos:
-        if info["metadata"]["chunk_index"] == int(name.split("__")[1]):
-            return info["content"]
-    print(name)
+def template():
+    prompt = "请为我生成一些数据表明用户是否想要查询习近平重要讲话数据库或者普通对话，返回json数组格式，" + \
+             "如[{\"query\" : 生成的用户查询, \"type\" : 0}, {\"query\" : 生成的用户查询, \"type\" : 1}]; 其中0表示普通对话， 1表示查询数据库\n" + \
+             "json数组:"
+    return prompt
+
+def gen_IR_data():
+    query = []
+    with open("./corpus.jsonl", "r") as file:
+        data = file.readlines()
+        for item in data:
+            temp = json.loads(item.strip())
+            query.append(temp["query"])
+    print(len(query))
+    with open("./query_type_data.csv", "a+") as file:
+        for item in query:
+            file.write(item + ",&1\n")
+
+def gen_IR_data2():
+    query = []
+    with open("/Users/rich/Downloads/PKUMOD-CCKS/训练集.txt", "r") as file:
+        data = file.readlines()
+        for item in data:
+            if item[0] == "q":
+                query.append(item[item.index(":") + 1:].split("\n")[0].strip())
+    with open("/Users/rich/Downloads/SogouQA.json", 'r', encoding='utf-8') as file:
+        data = json.load(file)
+        for item in data:
+            query.append(item["question"])
+    with open("/Users/rich/Downloads/train-zen-v1.0.json", 'r', encoding='utf-8') as file:
+        data = json.load(file)
+        for item in data["data"]:
+            for paragraph in item["paragraphs"]:
+                for qas in paragraph["qas"]:
+                    query.append(qas["question"])
+    print(len(query))
+    with open("./query_type_data.csv", "a+") as file:
+        for item in query:
+            file.write(item + ",&0\n")
+
+
 
 
 if __name__ == "__main__":
-    data_change()
+    gen_IR_data()
+    gen_IR_data2()

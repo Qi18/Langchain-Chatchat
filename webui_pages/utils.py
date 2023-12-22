@@ -367,7 +367,7 @@ class ApiRequest:
             "stream": stream,
             "model_name": model,
             "temperature": temperature,
-        }
+       }
 
         print(f"received input message:")
         pprint(data)
@@ -422,6 +422,34 @@ class ApiRequest:
             print(f"{filepath}添加完成")
             os.remove(filepath)
 
+
+    def intent_recognition(
+        self,
+        query: str,
+        no_remote_api: bool = None,
+    ):
+        '''
+        对应api.py/chat/knowledge_base_chat接口
+        '''
+        if no_remote_api is None:
+            no_remote_api = self.no_remote_api
+
+        data = {
+            "query": query,
+        }
+
+        if no_remote_api:
+            from server.chat.knowledge_base_chat import knowledge_base_chat
+            response = run_async(knowledge_base_chat(**data))
+            return self._fastapi_stream2generator(response, as_json=True)
+        else:
+            response = self.post(
+                "/chat/knowledge_base_chat",
+                json=data,
+                stream=True,
+            )
+            return self._httpx_stream2generator(response, as_json=True)
+
     def knowledge_base_chat(
         self,
         query: str,
@@ -434,7 +462,6 @@ class ApiRequest:
         temperature: float = TEMPERATURE,
         prompt_name: str = "knowledge_base_chat",
         no_remote_api: bool = None,
-        is_use_esQuery: bool = False,
     ):
         '''
         对应api.py/chat/knowledge_base_chat接口
@@ -464,6 +491,64 @@ class ApiRequest:
         else:
             response = self.post(
                 "/chat/knowledge_base_chat",
+                json=data,
+                stream=True,
+            )
+            return self._httpx_stream2generator(response, as_json=True)
+
+
+    def ir_query(self, query:str):
+        '''
+        对应api.py/chat/ir_query接口
+        '''
+        data = {
+            "query": query,
+        }
+        response = self.post(
+            "/chat/ir_query",
+            json=data,
+            stream=True,
+        )
+        return self._httpx_stream2generator(response, as_json=True)
+    def analysis_chat(
+        self,
+        query: str,
+        knowledge_base_name: str,
+        top_k: int = VECTOR_SEARCH_TOP_K,
+        score_threshold: float = SCORE_THRESHOLD,
+        history: List[Dict] = [],
+        stream: bool = True,
+        model: str = LLM_MODEL,
+        temperature: float = TEMPERATURE,
+        no_remote_api: bool = None,
+    ):
+        '''
+        对应api.py/chat/knowledge_base_chat接口
+        '''
+        if no_remote_api is None:
+            no_remote_api = self.no_remote_api
+
+        data = {
+            "query": query,
+            "knowledge_base_name": knowledge_base_name,
+            "top_k": top_k,
+            "score_threshold": score_threshold,
+            "history": history,
+            "stream": stream,
+            "model_name": model,
+            "temperature": temperature,
+            "local_doc_url": no_remote_api,
+        }
+
+        print(f"received input message:")
+        pprint(data)
+        if no_remote_api:
+            from server.chat.analysis_chat import analysis_chat
+            response = run_async(analysis_chat(**data))
+            return self._fastapi_stream2generator(response, as_json=True)
+        else:
+            response = self.post(
+                "/chat/analysis_chat",
                 json=data,
                 stream=True,
             )

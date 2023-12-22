@@ -174,6 +174,7 @@ class KBService(ABC):
                     score_threshold: float = SCORE_THRESHOLD,
                     search_method: str = "hybrid",
                     use_rerank: bool = True,
+                    test_mode: bool = False,
                     ):
         embeddings = self._load_embeddings()
         rerank_model = self._load_reranks()
@@ -218,7 +219,10 @@ class KBService(ABC):
             return docs[:top_k]
 
         # 排序阶段
-        docs = rerank_model.rerankOnlyModel(docs, query, top_k)
+        if test_mode:
+            docs = rerank_model.rerankOnlyModel(docs, query, top_k)
+        else:
+            docs = rerank_model.rerank(docs, query, top_k)
         return docs
 
     def search_docs_multiQ(self,
