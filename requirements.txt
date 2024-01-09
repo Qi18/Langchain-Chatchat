@@ -1,5 +1,6 @@
 langchain>=0.0.302
 fschat[model_worker]==0.2.29
+# fschat==0.2.34
 openai
 sentence_transformers
 transformers==4.33.3
@@ -72,6 +73,9 @@ wandb
 
 # 时间抽取
 jionlp
+autoawq
+auto_gptq
+optimum
 
 
 

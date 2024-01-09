@@ -38,7 +38,6 @@ def search_docs(query: str = Body(..., description="用户输入", examples=["�
         return []
     docs = kb.search_docs(query, top_k, score_threshold, search_method)
     data = [DocumentWithScore(**x[0].dict(), score=x[1]) for x in docs]
-
     return data
 
 
@@ -254,7 +253,7 @@ def update_files(
     '''
     更新知识库文档
     '''
-    print(file_metadata)
+    # print(file_metadata)
     if not validate_kb_name(knowledge_base_name):
         return BaseResponse(code=403, msg="Don't attack me")
 

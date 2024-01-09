@@ -6,6 +6,7 @@ import sys
 from multiprocessing import Process
 from datetime import datetime
 from pprint import pprint
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # 设置numexpr最大线程数，默认为CPU核心数
 try:

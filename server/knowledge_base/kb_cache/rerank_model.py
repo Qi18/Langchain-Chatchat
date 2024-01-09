@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta
 
 import numpy as np
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import torch
 from FlagEmbedding import FlagReranker
 from configs import RERANK_MODEL, MODEL_PATH
+from server.query_process.base import query_time_extract
 from server.utils import rerank_device
 from loguru import logger
 import os
@@ -27,57 +30,53 @@ class ReRankModel:
 
     # 时间query,领域知识的考虑
     def rerank(self, docs, query, top_k):
+        logger.info(f"rerank的query是{query}")
         document_map = {doc[0].page_content: doc[0] for doc in docs}
         rerank_pairs = [(query, doc[0].page_content) for doc in docs]
         reranked_list = self.rerank_by_model(rerank_pairs)
-        parse_info = jio.ner.extract_time(query, time_base=time.time(), with_parsing=True)
-        if parse_info:
-            logger.info("query带有时间信息")
-            time_docs = []
-            out_time_docs = []
-            for item in reranked_list:
-                model_score = sigmoid(item[1])
-                doc = document_map[item[0]]
-                if "publishTime" in doc.metadata.keys() and doc_in_queryTime(parse_info,
-                                                                             doc.metadata["publishTime"]):
-                    time_docs.append((doc, model_score))
-                else:
-                    out_time_docs.append((doc, model_score))
-            logger.info(f"满足时间的doc个数{len(time_docs)}")
-            # print(time_docs)
-            for item in time_docs:
-                print(item[0].page_content + "\n" + str(item[1]))
-            # out_time_docs = self.domain_sort(out_time_docs)
-            out_time_docs = self.time_sort(out_time_docs)
-            if len(time_docs) < top_k:
-                time_docs.extend(out_time_docs[top_k - len(time_docs):])
-            return time_docs[:top_k]
-        else:
-            logger.info("query不带有时间信息")
-            doc_score = []
-            for item in reranked_list:
-                model_score = sigmoid(item[1])
-                doc = document_map[item[0]]
-                doc_score.append((doc, model_score))
-            # doc_score = self.domain_sort(doc_score)
-            doc_score = self.time_sort(doc_score)
-            for item in doc_score:
-                print(item[0].page_content + "\n" + str(item[1]))
-            return doc_score[:top_k]
-        # doc_score1 = sorted(doc_score, key=lambda x: -x[2])
-        # logger.debug("model排序")
-        # for item in doc_score1[:3]:
-        #     logger.info(item[0])
-        #     logger.info("总:" + str(item[1]))
-        #     logger.info("model:" + str(item[2]))
-        #     logger.info("addition:" + str(item[3]))
-        # doc_score = sorted(doc_score, key=lambda x: -x[1])
-        # logger.debug("总排序")
-        # for item in doc_score[:3]:
-        #     logger.info(item[0])
-        #     logger.info("总:" + str(item[1]))
-        #     logger.info("model:" + str(item[2]))
-        #     logger.info("addition:" + str(item[3]))
+        ans = []
+        for item in reranked_list:
+            model_score = sigmoid(item[1])
+            doc = document_map[item[0]]
+            ans.append((doc, model_score))
+        self.time_sort(ans)
+        for item in ans:
+            print(item[0].page_content + "\n----\n" + str(item[1]))
+        return self.diverse(ans, top_k)
+
+        # if parse_info:
+        #     # logger.info("query带有时间信息")
+        #     time_docs = []
+        #     out_time_docs = []
+        #     for item in reranked_list:
+        #         model_score = sigmoid(item[1])
+        #         doc = document_map[item[0]]
+        #         if "publishTime" in doc.metadata.keys() and doc_in_queryTime(parse_info,
+        #                                                                      doc.metadata["publishTime"]):
+        #             time_docs.append((doc, model_score))
+        #         else:
+        #             out_time_docs.append((doc, model_score))
+        #     logger.info(f"满足时间的doc个数{len(time_docs)}")
+        #     # print(time_docs)
+        #     for item in time_docs:
+        #         print(item[0].page_content + "\n" + str(item[1]))
+        #     # out_time_docs = self.domain_sort(out_time_docs)
+        #     out_time_docs = self.time_sort(out_time_docs)
+        #     if len(time_docs) < top_k:
+        #         time_docs.extend(out_time_docs[top_k - len(time_docs):])
+        #     return self.diverse(time_docs, top_k)
+        # else:
+        #     logger.info("query不带有时间信息")
+        #     doc_score = []
+        #     for item in reranked_list:
+        #         model_score = sigmoid(item[1])
+        #         doc = document_map[item[0]]
+        #         doc_score.append((doc, model_score))
+        #     # doc_score = self.domain_sort(doc_score)
+        #     doc_score = self.time_sort(doc_score)
+        #     for item in doc_score:
+        #         print(item[0].page_content + "\n" + str(item[1]))
+        #     return self.diverse(doc_score, top_k)
 
     def rerankOnlyModel(self, docs, query, top_k):
         document_map = {doc[0].page_content: doc[0] for doc in docs}
@@ -130,6 +129,25 @@ class ReRankModel:
         logger.info(f"按最近时间+model打分排序{len(ans)}")
         return sorted(ans, key=lambda x: -x[1])
 
+    #保持返回结果的多样性
+    def diverse(self, doc_score, top_k, same_num=2):
+        # doc_score是已经按照时间排序的
+        ans = []
+        exist_doc = {}
+        for item in doc_score:
+            filename = os.path.basename(item[0].metadata["source"])
+            if filename not in exist_doc.keys():
+                exist_doc[filename] = 1
+                ans.append(item)
+            elif exist_doc[filename] < same_num or float(item[1]) > 0.5: # 保证分数大于0.5的都能进来
+                exist_doc[filename] += 1
+                ans.append(item)
+            elif exist_doc[filename] >= same_num:
+                continue
+            if len(ans) == top_k:
+                return ans
+        return doc_score[:top_k]
+
 
 # 保证model预测的值域和addition_score的值域一致
 def sigmoid(x):
@@ -148,8 +166,9 @@ def doc_in_queryTime(parse_info, timeInfo):
     return False
 
 def cal_near_time_score(timeStamp):
-    assert len(str(timeStamp)) == 13, "时间戳是13位的"
-    timeStamp = timeStamp / 1000
+    timeStamp = timeStamp / pow(10, len(str(timeStamp)) - 10)
+    # assert len(str(timeStamp)) == 13, "时间戳是13位的"
+    # timeStamp = timeStamp / 1000
     time_interval = pow(10, 8)
     return max(1 - (int(time.time()) - timeStamp) / time_interval, -1)
 
@@ -224,5 +243,6 @@ def load_rerank_model(model: str, device: str):
 
 
 if __name__ == "__main__":
-    pairs = ("What is the name of the Communist Party's eighth national congress?", '国际数据管理协会（DAMA）给出的定义：数据治理是对数据资产管理行使权力和控制的活动集合。 国际数据治理研究所（DGI）给出的定义：数据治理是一个通过一系列信息相关的过程来实现决策权和职责分工的系统，这些过程按照达成共识的模型来执行，该模型描述了谁（Who）能根据什么信息，在什么时间（When）和情况（Where）下，用什么方法（How），采取什么行动（What）。\n数据治理')
-    print(ReRankModel().rerank_by_model([pairs]))
+    # pairs = ("What is the name of the Communist Party's eighth national congress?", '国际数据管理协会（DAMA）给出的定义：数据治理是对数据资产管理行使权力和控制的活动集合。 国际数据治理研究所（DGI）给出的定义：数据治理是一个通过一系列信息相关的过程来实现决策权和职责分工的系统，这些过程按照达成共识的模型来执行，该模型描述了谁（Who）能根据什么信息，在什么时间（When）和情况（Where）下，用什么方法（How），采取什么行动（What）。\n数据治理')
+    # print(ReRankModel().rerank_by_model([pairs]))
+    print(jio.ner.extract_time("习近平2023年11月22日到2023年12月22日行程是什么"))

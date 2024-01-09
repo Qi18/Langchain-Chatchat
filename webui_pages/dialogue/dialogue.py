@@ -9,6 +9,9 @@ import os
 from configs import LLM_MODEL, TEMPERATURE, HISTORY_LEN
 from server.utils import get_model_worker_config
 from typing import List, Dict
+import logging
+
+logger = logging.getLogger('chat')
 
 chat_box = ChatBox(
     assistant_avatar=os.path.join(

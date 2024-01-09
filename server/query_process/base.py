@@ -1,129 +1,85 @@
 import json
 import logging
 import os
-from datetime import datetime
-from typing import List
 
 from configs import LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, LOG_PATH
-from server.chat.chat import chatWithHistory, chatOnes
-from server.chat.utils import History
-from server.knowledge_base.kb_doc_api import search_docs_multiQ, search_docs
 from server.query_process.query_analysis import query_ner
+import jionlp as jio
+import time
+from datetime import datetime
 
 
 def get_logger(name: str):
     logger = logging.getLogger(name)
-    # 创建一个handler，用于写入日志文件
     filename = f'{datetime.now().date()}_{name}.log'
-    fh = logging.FileHandler(os.path.join(LOG_PATH, filename), mode='w+', encoding='utf-8')
-    # 再创建一个handler用于输出到控制台
-    ch = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+    has_file_handler = False
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            has_file_handler = True
+            handler.baseFilename = os.path.join(LOG_PATH, filename)
+            break
+    if not has_file_handler:
+        # 创建一个handler，用于写入日志文件
+        fh = logging.FileHandler(os.path.join(LOG_PATH, filename), encoding='utf-8')
+        # handler = TimedRotatingFileHandler(f'{name}.log', when='D', interval=1, backupCount=1000)
+        # 再创建一个handler用于输出到控制台
+        # ch = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(filename)s[line:%(lineno)d] - %(levelname)s: %(message)s')
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
     logger.setLevel(logging.INFO)
     # 定义控制台输出层级
     # logger.setLevel(logging.DEBUG)
     # 为文件操作符绑定格式（可以绑定多种格式例fh.setFormatter(formatter2)）
-    fh.setFormatter(formatter)
+    # fh.setFormatter(formatter)
     # 为控制台操作符绑定格式（可以绑定多种格式例ch.setFormatter(formatter2)）
-    ch.setFormatter(formatter)
+    # ch.setFormatter(formatter)
     # 给logger对象绑定文件操作符
-    logger.addHandler(fh)
+    # logger.addHandler(fh)
     # 给logger对象绑定文件操作符
-    logger.addHandler(ch)
+    # logger.addHandler(ch)
     return logger
 
 
 logger = get_logger("chat")
 
 
-def enhance_query_search(query: str,
-                         knowledge_base_name: str,
-                         history: List[History],
-                         model_name: str = LLM_MODEL,
-                         top_k: int = VECTOR_SEARCH_TOP_K,
-                         score_threshold: float = SCORE_THRESHOLD,
-                         history_query: bool = False,
-                         multi_query: bool = False):
-    logger.info(f"用户输入：{query}")
-    # 优化query中的时间信息
-    query = query_time_process(query)
-    logger.info(f"时间优化后的query：{query}")
-    # 通过历史对话优化query
-    if len(history) == 0:
-        history_query = False
-    retry = 3
-    if history_query:
-        new_query = historyQuery(query=query, history=history, model_name=model_name)
-        while retry > 0:
-            try:
-                query = json.loads(new_query)["question"]
-                retry = -2
-            except ValueError:
-                retry -= 1
-                new_query = historyQuery(query=query, history=history)
-
-    # 通过先验知识优化query
-    retry = 3
-    if multi_query:
-        new_querys = multiQuery(query=query, history=history)
-        while retry > 0:
-            try:
-                json.loads(new_querys)
-                retry = -2
-            except ValueError:
-                retry -= 1
-                new_querys = multiQuery(query=query, history=history)
-
-    if retry == -2:
-        print(f"multiquery:{new_querys}")
-        multiquery = [query]
-        multiquery.extend([item["query"] for item in json.loads(new_querys)])
-        docs = search_docs_multiQ(querys=multiquery, knowledge_base_name=knowledge_base_name, top_k=top_k,
-                                  score_threshold=score_threshold, search_method="hybrid")
-    else:
-        # logger = build_logger("chat", f"{datetime.now().date()}_chat.log")
-        logger.info(f"最后查询：{query}")
-        docs = search_docs(query, knowledge_base_name, top_k, score_threshold, search_method="hybrid")
-    return docs
-
-
-def multiQuery(query: str,
-               history: [History],
-               model_name: str = LLM_MODEL, ):
-    from datetime import datetime
-    current_time = datetime.today()
-    info = {"question": query, "info": f"现在的时间是{current_time}", "num": 3}
-    return chatWithHistory(info, "pre_chat", history, model_name=model_name, temperature=0.1)
-
-
-def historyQuery(query: str,
-                 history: [History],
-                 model_name: str = LLM_MODEL, ):
-    info = {"question": query, "chat_history": [i.to_msg_template() for i in history]}
-    return chatOnes(info, "history_enQuery", model_name=model_name, temperature=0.1)
+def query_time_extract(query: str):
+    entity = query_ner(query)
+    logger.info(f"query_ner:{entity}")
+    time_dict = time_info()
+    time_words = []
+    for item in entity:
+        if item["entity"] == "DATE":
+            isUse = False
+            for key, value in time_dict.items():
+                if item["words"] in value:
+                    isUse = True
+                    time_words.append(jio.parse_time(key.split("> ")[1].strip(), time_base=time.time()))
+                    query = query.replace(item["words"], "")
+                    break
+            if not isUse:
+                time_change = jio.parse_time(item["words"], time_base=time.time())
+                try:
+                    if time_change["type"] == "time_span" or time_change["type"] == "time_point":
+                        time_words.append(time_change)
+                        query = query.replace(item["words"], "")
+                except:
+                    pass
+    return query, time_words
 
 
 def query_time_process(query: str):
-    import jionlp as jio
-    import time
-    from datetime import datetime
-
     entity = query_ner(query)
     logger.info(f"query_ner:{entity}")
+    time_dict = time_info()
+    # ner识别出时间实体，替换为可解析时间
     for item in entity:
         if item["entity"] == "DATE":
-            if item["words"] in ["近些时间", "近期", "最近", "近些时间内", "最近一段时间", "最近一段时间内", "近来",
-                                 "近些日子", "近些日子内", ]:
-                query = query.replace(item["words"], "近一个月")
-            elif item["words"] in ["近几年来", "最近几年"]:
-                query = query.replace(item["words"], "近两年")
-    # filepath = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "tool", "timewords")
-    # with open(filepath, "r", encoding="utf-8") as f:
-    #     time_words = f.readlines()
-    #     for time_word in time_words:
-    #         if time_word.strip() in query:
-    #             query = query.replace(time_word.strip(), "近一个月")
-    #             break
+            for key, value in time_dict.items():
+                if item["words"] in value:
+                    query = query.replace(item["words"], key.split("> ")[1].strip())
+                    break
     parse_info = jio.ner.extract_time(query, time_base=time.time(), with_parsing=True)
     # print(parse_info)
     for item in parse_info:
@@ -142,6 +98,29 @@ def query_time_process(query: str):
     return query
 
 
+def time_info():
+    time_dict = {}
+    with open("/data/lrq/llm/sync/Langchain-Chatchat/server/query_process/timewords.txt", "r") as f:
+        time_info = f.readlines()
+        time_words = []
+        index = None
+        for info in time_info:
+            info = info.strip()
+            if "<" in info and ">" in info:
+                if index:
+                    time_dict[index] = time_words
+                    time_words = []
+                    index = None
+                index = info
+            elif info:
+                time_words.append(info)
+        if index:
+            time_dict[index] = time_words
+    # print(time_dict)
+    return time_dict
+
+
 if __name__ == "__main__":
-    query = "2023年12月04日习近平去了哪里"
-    print(query_time_process(query))
+    query = "习近平这个月12号，13号，15号干了什么事"
+    print(query_time_extract(query))
+    # print(datetime.strptime("2012-01-01 00:00:00", "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d"))

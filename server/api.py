@@ -18,7 +18,6 @@ from server.knowledge_base.kb_api import list_kbs, create_kb, delete_kb
 from server.knowledge_base.kb_doc_api import (list_files, upload_files, delete_files,
                                               update_files, upload_custom_files,download_doc, recreate_vector_store,
                                               search_docs, DocumentWithScore)
-from server.query_process.query_analysis import ir_query
 from server.llm_api import list_running_models, list_config_models, change_llm_model, stop_llm_model
 from server.utils import BaseResponse, ListResponse, FastAPI, MakeFastAPIOffline
 from typing import List
@@ -69,9 +68,9 @@ def create_app():
              tags=["Chat"],
              summary="分析对话")(analysis_chat)
 
-    app.post("/chat/ir_query",
-             tags=["Chat"],
-             summary="query识别intent")(ir_query)
+    # app.post("/chat/ir_query",
+    #          tags=["Chat"],
+    #          summary="query识别intent")(ir_query)
 
     app.post("/chat/search_engine_chat",
              tags=["Chat"],

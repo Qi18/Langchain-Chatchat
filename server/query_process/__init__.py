@@ -1,1 +1,0 @@
-from .query_analysis import ir_query

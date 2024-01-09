@@ -1,10 +1,15 @@
+import time
+from datetime import datetime
 from typing import Dict
 
 from elasticsearch import Elasticsearch
 from langchain.document_loaders import TextLoader
+from langchain.schema.embeddings import Embeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores.elasticsearch import ElasticsearchStore
-from configs import kbs_config
+from configs import kbs_config, logger
+from server.query_process.base import query_time_extract
+import jionlp as jio
 
 
 def load_file(filepath, chunk_size, chunk_overlap):
@@ -16,7 +21,6 @@ def load_file(filepath, chunk_size, chunk_overlap):
 
 
 def _default_knn_setting(dim: int) -> Dict:
-    """Generates a default index mapping for kNN search."""
     return {
         "settings": {
             "number_of_shards": 1,
@@ -41,22 +45,68 @@ def _default_knn_setting(dim: int) -> Dict:
                     "index": True,
                     "similarity": "cosine",
                 },
+                "time": {
+                    "type": "long"
+                },
             }
         }
     }
 
 
-def generate_search_query(vec, size) -> Dict:
+def generate_search_query(text: str,
+                          embedding: Embeddings,
+                          size: int,
+                          time_filter: bool = False) -> Dict:
+    # time_out_text, timeInfo = query_time_extract(text)
+    timeInfo = jio.ner.extract_time(text)
+    vec = embedding.embed_query(text)
+    if not time_filter or not timeInfo:
+        query = {
+            "query": {
+                "script_score": {
+                    "query": {
+                        "match_all": {}
+                    },
+                    "script": {
+                        "source": "cosineSimilarity(params.queryVector, 'vector') + 1.0",
+                        "params": {
+                            "queryVector": vec
+                        }
+                    }
+                }
+            },
+            "size": size
+        }
+        return query
+    time_range = []
+    for time in timeInfo:
+        if time["type"] == "time_span" or time["type"] == "time_point":
+            time_range.append({
+                "range": {
+                    "time": {
+                        "gte": datetime.strptime(time["detail"]["time"][0], "%Y-%m-%d %H:%M:%S").timestamp(),
+                        "lte": datetime.strptime(time["detail"]["time"][1], "%Y-%m-%d %H:%M:%S").timestamp()
+                    }
+                }})
     query = {
         "query": {
-            "script_score": {
-                "query": {
-                    "match_all": {}
+            "bool": {
+                "must": {
+                    "script_score": {
+                        "query": {
+                            "match_all": {}
+                        },
+                        "script": {
+                            "source": "cosineSimilarity(params.queryVector, 'vector') + 1.0",
+                            "params": {
+                                "queryVector": vec
+                            }
+                        }
+                    }
                 },
-                "script": {
-                    "source": "cosineSimilarity(params.queryVector, 'vector') + 1.0",
-                    "params": {
-                        "queryVector": vec
+                "filter": {
+                    "bool": {
+                        "should": time_range
                     }
                 }
             }
@@ -66,26 +116,101 @@ def generate_search_query(vec, size) -> Dict:
     return query
 
 
-def generate_knn_query(vec, size) -> Dict:
-    query = {
+def generate_knn_query(text: str,
+                       embedding: Embeddings,
+                       size: int,
+                       time_filter: bool = False) -> Dict:
+    timeInfo = jio.ner.extract_time(text)
+    vec = embedding.embed_query(text)
+    if not time_filter or not timeInfo:
+        query = {
+            "knn": {
+                "field": "vector",
+                "query_vector": vec,
+                "k": 10,
+                "num_candidates": 100
+            },
+            "size": size
+        }
+        return query
+    time_range = []
+    for time in timeInfo:
+        if time["type"] == "time_span" or time["type"] == "time_point":
+            time_range.append({
+                "range": {
+                    "time": {
+                        "gte": datetime.strptime(time["detail"]["time"][0], "%Y-%m-%d %H:%M:%S").timestamp(),
+                        "lte": datetime.strptime(time["detail"]["time"][1], "%Y-%m-%d %H:%M:%S").timestamp()
+                    }
+                }})
+    query_time_range = {
         "knn": {
             "field": "vector",
             "query_vector": vec,
             "k": 10,
-            "num_candidates": 100
+            "num_candidates": size * 5,
+            "filter": {
+                "bool": {
+                    "should": time_range
+                }
+            }
         },
         "size": size
     }
-    return query
+    return query_time_range
 
 
-def generate_hybrid_query(text, vec, size) -> Dict:
+def generate_hybrid_query(text: str,
+                          embedding: Embeddings,
+                          size: int = 10,
+                          time_filter: bool = False) -> Dict:
+    timeInfo = jio.ner.extract_time(text)
+    vec = embedding.embed_query(text)
+    if not time_filter or not timeInfo:
+        query = {
+            "query": {
+                "match": {
+                    "text": {
+                        "query": text,
+                    }
+                }
+            },
+            "knn": {
+                "field": "vector",
+                "query_vector": vec,
+                "k": 10,
+                "num_candidates": size * 5,
+            },
+            "size": size,
+            # "rank": {"rrf": {}}
+        }
+        return query
+    logger.info(f"启用时间过滤")
+    logger.info(f"query时间信息是{timeInfo}")
+    time_range = []
+    for time in timeInfo:
+        if time["type"] == "time_span" or time["type"] == "time_point":
+            time_range.append({
+                "range": {
+                    "time": {
+                        "gte": datetime.strptime(time["detail"]["time"][0], "%Y-%m-%d %H:%M:%S").timestamp(),
+                        "lte": datetime.strptime(time["detail"]["time"][1], "%Y-%m-%d %H:%M:%S").timestamp()
+                    }
+                }})
     query = {
         "query": {
-            "match": {
-                "text": {
-                    "query": text,
-                    # "boost": 1 - knn_boost
+            "bool": {
+                "must": {
+                    "match": {
+                        "text": {
+                            "query": text
+                        }
+                    }
+                },
+                "filter": {
+                    "bool": {
+                        "should": time_range
+                    }
                 }
             }
         },
@@ -94,25 +219,64 @@ def generate_hybrid_query(text, vec, size) -> Dict:
             "query_vector": vec,
             "k": 10,
             "num_candidates": size * 5,
-            # "boost": knn_boost
-        },
-        "size": size,
-        "rank": {"rrf": {}}
-    }
-    return query
-
-
-def generate_keywords_query(text, size) -> Dict:
-    query = {
-        "query": {
-            "match": {
-                "text": {
-                    "query": text,
+            "filter": {
+                "bool": {
+                    "should": time_range
                 }
             }
         },
         "size": size,
         # "rank": {"rrf": {}}
+    }
+    return query
+
+
+def generate_keywords_query(text: str,
+                            size: int,
+                            time_filter: bool = False) -> Dict:
+    timeInfo = jio.ner.extract_time(text)
+    if not time_filter or not timeInfo:
+        query = {
+            "query": {
+                "match": {
+                    "text": {
+                        "query": text,
+                    }
+                }
+            },
+            "size": size,
+        }
+        return query
+    logger.info(f"启用时间过滤")
+    logger.info(f"query时间信息是{timeInfo}")
+    time_range = []
+    for time in timeInfo:
+        if time["type"] == "time_span" or time["type"] == "time_point":
+            time_range.append({
+                "range": {
+                    "time": {
+                        "gte": datetime.strptime(time["detail"]["time"][0], "%Y-%m-%d %H:%M:%S").timestamp(),
+                        "lte": datetime.strptime(time["detail"]["time"][1], "%Y-%m-%d %H:%M:%S").timestamp()
+                    }
+                }})
+    query = {
+        "query": {
+            "bool": {
+                "must": {
+                    "match": {
+                        "text": {
+                            "query": text
+                        }
+                    }
+                },
+                "filter": {
+                    "bool": {
+                        "should": time_range
+                    }
+                }
+            }
+        },
+        "size": size,
     }
     return query
 

@@ -497,19 +497,19 @@ class ApiRequest:
             return self._httpx_stream2generator(response, as_json=True)
 
 
-    def ir_query(self, query:str):
-        '''
-        对应api.py/chat/ir_query接口
-        '''
-        data = {
-            "query": query,
-        }
-        response = self.post(
-            "/chat/ir_query",
-            json=data,
-            stream=True,
-        )
-        return self._httpx_stream2generator(response, as_json=True)
+    # def ir_query(self, query:str):
+    #     '''
+    #     对应api.py/chat/ir_query接口
+    #     '''
+    #     data = {
+    #         "query": query,
+    #     }
+    #     response = self.post(
+    #         "/chat/ir_query",
+    #         json=data,
+    #         stream=True,
+    #     )
+    #     return self._httpx_stream2generator(response, as_json=True)
     def analysis_chat(
         self,
         query: str,

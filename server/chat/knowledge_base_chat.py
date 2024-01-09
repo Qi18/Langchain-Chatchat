@@ -1,8 +1,8 @@
 from fastapi import Body, Request
 from fastapi.responses import StreamingResponse
 
-from configs import (LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, TEMPERATURE, LOG_PATH)
-from server.query_process.base import enhance_query_search, logger
+from configs import (LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, TEMPERATURE, LOG_PATH, logger)
+from server.chat.query_enhance import enhance_query_search
 from server.utils import wrap_done, get_ChatOpenAI, get_model_worker_config, fschat_openai_api_address
 from server.utils import BaseResponse, get_prompt_template
 from server.chat.utils import History
@@ -47,77 +47,82 @@ async def knowledge_base_chat(query: str = Body(..., description="用户输入",
     history = [History.from_data(h) for h in history]
 
     async def knowledge_base_chat_iterator(query: str,
-                                           top_k: int,
-                                           history: Optional[List[History]],
-                                           model_name: str = LLM_MODEL,
-                                           prompt_name: str = prompt_name,
-                                           ) -> AsyncIterable[str]:
-        import time
-        start_time = time.time()
-        callback = AsyncIteratorCallbackHandler()
-        model = get_ChatOpenAI(
-            model_name=model_name,
-            temperature=temperature,
-            callbacks=[callback],
-        )
+                                               top_k: int,
+                                               history: Optional[List[History]],
+                                               model_name: str = LLM_MODEL,
+                                               prompt_name: str = "knowledge_base_chat1",
+                                               ) -> AsyncIterable[str]:
+            # import time
+            # start_time = time.time()
+            callback = AsyncIteratorCallbackHandler()
+            model = get_ChatOpenAI(
+                model_name=model_name,
+                temperature=temperature,
+                callbacks=[callback],
+            )
 
-        # 优化query和搜索部分
-        docs = enhance_query_search(query=query, knowledge_base_name=knowledge_base_name, top_k=top_k,
-                                    score_threshold=score_threshold, model_name=model_name, history=history)
+            # 优化query和搜索部分
+            docs = enhance_query_search(query=query, knowledge_base_name=knowledge_base_name, top_k=top_k,
+                                        score_threshold=score_threshold, model_name=model_name, history=history)
 
-        if docs == None or len(docs) == 0:
-            yield json.dumps({
-                "answer": "抱歉，在知识库中没有找到相关的信息。请您尝试更详细的阐述您的问题或者询问其他的事项，我会尽量为您解答！"},
-                ensure_ascii=False)
-            return
+            if docs == None or len(docs) == 0:
+                yield json.dumps({
+                    "answer": "抱歉，在知识库中没有找到相关的信息。请您尝试更详细的阐述您的问题或者询问其他的事项，我会尽量为您解答！"},
+                    ensure_ascii=False)
+                return
 
-        context = "\n---\n".join(
-            [os.path.basename(doc.metadata.get("source")) + "\n" + doc.page_content for doc in docs])
-        # print("context:\n" + context)
-        # print("history:\n")
-        # for i in history:
-        #     print(i.content)
-        prompt_template = get_prompt_template(prompt_name)
-        input_msg = History(role="user", content=prompt_template).to_msg_template(False)
+            context = "\n---------\n".join(doc.page_content for doc in docs)
+            # logger.info("context:\n" + context)
 
-        chat_prompt = ChatPromptTemplate.from_messages(
-            [i.to_msg_template() for i in history] + [input_msg])
+            prompt_template = get_prompt_template(prompt_name)
+            input_msg = History(role="user", content=prompt_template).to_msg_template(False)
 
-        chain = LLMChain(prompt=chat_prompt, llm=model)
+            chat_prompt = ChatPromptTemplate.from_messages(
+                [i.to_msg_template() for i in history] + [input_msg])
+            # for message in chat_prompt.format_messages(context=context, question=query):
+            #     mes_json = message.to_json()
+            #     json.dumps({"role": mes_json["role"], "content": mes_json["content"]}, ensure_ascii=False)
+            logger.info("模型输入:\n" + "\n".join(["role:" + message.to_json()["kwargs"]["role"] + "\n" + "content:" +
+                                                   message.to_json()["kwargs"]["content"] for message in
+                                                   chat_prompt.format_messages(context=context, question=query)]))
 
-        # Begin a task that runs in the background.
-        task = asyncio.create_task(wrap_done(
-            chain.acall({"context": context, "question": query}),
-            callback.done),
-        )
+            chain = LLMChain(prompt=chat_prompt, llm=model)
 
-        source_documents = []
-        for inum, doc in enumerate(docs):
-            filename = os.path.split(doc.metadata["source"])[-1]
-            if local_doc_url:
-                url = "file://" + doc.metadata["source"]
+            # Begin a task that runs in the background.
+            task = asyncio.create_task(wrap_done(
+                chain.acall({"context": context, "question": query}),
+                callback.done),
+            )
+
+            source_documents = []
+            for inum, doc in enumerate(docs):
+                filename = os.path.split(doc.metadata["source"])[-1]
+                if local_doc_url:
+                    url = "file://" + doc.metadata["source"]
+                else:
+                    parameters = urlencode({"knowledge_base_name": knowledge_base_name, "file_name": filename})
+                    url = f"{request.base_url}knowledge_base/download_doc?" + parameters
+                # time = datetime.fromtimestamp(int(doc.metadata["publishTime"]) / 1000).strftime("%Y-%m-%d")
+                text = f"""出处 [{inum + 1}] [{filename}]({url}) \n\n{doc.page_content} \n\n"""
+                source_documents.append(text)
+
+            if stream:
+                answer = ""
+                async for token in callback.aiter():
+                    # Use server-sent-events to stream the response
+                    answer += token
+                    yield json.dumps({"answer": token}, ensure_ascii=False)
+                logger.info(f"模型回答：{answer}")
+                yield json.dumps({"docs": source_documents}, ensure_ascii=False)
             else:
-                parameters = urlencode({"knowledge_base_name": knowledge_base_name, "file_name": filename})
-                url = f"{request.base_url}knowledge_base/download_doc?" + parameters
-            # time = datetime.fromtimestamp(int(doc.metadata["publishTime"]) / 1000).strftime("%Y-%m-%d")
-            text = f"""出处 [{inum + 1}] [{filename}]({url}) \n\n{doc.page_content} \n\n"""
-            source_documents.append(text)
+                answer = ""
+                async for token in callback.aiter():
+                    answer += token
+                yield json.dumps({"answer": answer,
+                                  "docs": source_documents},
+                                 ensure_ascii=False)
 
-        if stream:
-            async for token in callback.aiter():
-                # Use server-sent-events to stream the response
-                yield json.dumps({"answer": token}, ensure_ascii=False)
-            yield json.dumps({"docs": source_documents}, ensure_ascii=False)
-        else:
-            answer = ""
-            async for token in callback.aiter():
-                answer += token
-            yield json.dumps({"answer": answer,
-                              "docs": source_documents},
-                             ensure_ascii=False)
-
-        await task
-        # logger.info(f"chat响应时间: {time.time() - start_time}")
+            await task
 
     return StreamingResponse(knowledge_base_chat_iterator(query=query,
                                                           top_k=top_k,

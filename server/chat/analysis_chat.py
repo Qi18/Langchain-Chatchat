@@ -3,7 +3,9 @@ from fastapi import Body, Request
 from fastapi.responses import StreamingResponse
 
 from configs import (LLM_MODEL, VECTOR_SEARCH_TOP_K, SCORE_THRESHOLD, TEMPERATURE, LOG_PATH)
-from server.query_process.base import enhance_query_search, logger
+# from server.query_process.base import enhance_query_search, logger
+from server.chat.query_enhance import enhance_query_search
+from server.query_process.base import get_logger
 from server.utils import wrap_done, get_ChatOpenAI, get_model_worker_config, fschat_openai_api_address
 from server.utils import BaseResponse, get_prompt_template
 from server.chat.utils import History
@@ -16,6 +18,12 @@ from langchain.prompts.chat import ChatPromptTemplate
 import json
 import os
 from urllib.parse import urlencode
+import logging
+
+# logger = get_logger("chat")
+
+
+# logger = logging.getLogger('chat')
 
 
 async def analysis_chat(query: str = Body(..., description="用户输入", examples=["恼羞成怒"]),
@@ -37,6 +45,7 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
                         local_doc_url: bool = Body(False, description="知识文件返回本地路径(true)或URL(false)"),
                         request: Request = None,
                         ):
+    logger = get_logger("chat")
     history = [History.from_data(h) for h in history]
     intent = query_ir(query)
     logger.info(f"query intent判别：{intent}")
@@ -45,7 +54,7 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
                                                top_k: int,
                                                history: Optional[List[History]],
                                                model_name: str = LLM_MODEL,
-                                               prompt_name: str = "knowledge_base_chat",
+                                               prompt_name: str = "knowledge_base_chat1",
                                                ) -> AsyncIterable[str]:
             # import time
             # start_time = time.time()
@@ -66,17 +75,20 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
                     ensure_ascii=False)
                 return
 
-            context = "\n---\n".join(
-                [os.path.basename(doc.metadata.get("source")) + "\n" + doc.page_content for doc in docs])
-            # print("context:\n" + context)
-            # print("history:\n")
-            # for i in history:
-            #     print(i.content)
+            context = "\n---------\n".join(doc.page_content for doc in docs)
+            # logger.info("context:\n" + context)
+
             prompt_template = get_prompt_template(prompt_name)
             input_msg = History(role="user", content=prompt_template).to_msg_template(False)
 
             chat_prompt = ChatPromptTemplate.from_messages(
                 [i.to_msg_template() for i in history] + [input_msg])
+            # for message in chat_prompt.format_messages(context=context, question=query):
+            #     mes_json = message.to_json()
+            #     json.dumps({"role": mes_json["role"], "content": mes_json["content"]}, ensure_ascii=False)
+            logger.info("模型输入:\n" + "\n".join(["role:" + message.to_json()["kwargs"]["role"] + "\n" + "content:" +
+                                                   message.to_json()["kwargs"]["content"] for message in
+                                                   chat_prompt.format_messages(context=context, question=query)]))
 
             chain = LLMChain(prompt=chat_prompt, llm=model)
 
@@ -99,9 +111,12 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
                 source_documents.append(text)
 
             if stream:
+                answer = ""
                 async for token in callback.aiter():
                     # Use server-sent-events to stream the response
+                    answer += token
                     yield json.dumps({"answer": token}, ensure_ascii=False)
+                logger.info(f"模型回答：{answer}")
                 yield json.dumps({"docs": source_documents}, ensure_ascii=False)
             else:
                 answer = ""
@@ -116,7 +131,7 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
         return StreamingResponse(knowledge_base_chat_iterator(query=query,
                                                               top_k=top_k,
                                                               history=history,
-                                                              model_name=model_name,),
+                                                              model_name=model_name, ),
                                  media_type="text/event-stream")
     # elif intent == "chat" or intent == "hint_chat":
     else:
@@ -136,6 +151,10 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
             input_msg = History(role="user", content=prompt_template).to_msg_template(False)
             chat_prompt = ChatPromptTemplate.from_messages(
                 [i.to_msg_template() for i in history] + [input_msg])
+            logger.info("模型输入:\n" + "\n".join(["role:" + message.to_json()["kwargs"]["role"] + "\n" + "content:" +
+                                                   message.to_json()["kwargs"]["content"] for message in
+                                                   chat_prompt.format_messages(input=query)]))
+
             chain = LLMChain(prompt=chat_prompt, llm=model)
 
             # Begin a task that runs in the background.
@@ -145,9 +164,12 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
             )
 
             if stream:
+                answer = ""
                 async for token in callback.aiter():
                     # Use server-sent-events to stream the response
+                    answer += token
                     yield json.dumps({"answer": token}, ensure_ascii=False)
+                logger.info(f"模型回答：{answer}")
             else:
                 answer = ""
                 async for token in callback.aiter():
@@ -158,5 +180,5 @@ async def analysis_chat(query: str = Body(..., description="用户输入", examp
 
         return StreamingResponse(chat_iterator(query=query,
                                                history=history,
-                                               model_name=model_name,),
+                                               model_name=model_name, ),
                                  media_type="text/event-stream")

@@ -25,6 +25,7 @@ from server.knowledge_base.utils import (
     get_kb_path, get_doc_path, load_embeddings, KnowledgeFile,
     list_kbs_from_folder, list_files_from_folder
 )
+from server.query_process.base import query_time_extract
 from server.utils import embedding_device, rerank_device
 from typing import List, Union, Dict, Optional, Tuple, Any
 from server.knowledge_base.kb_cache.rerank_model import load_rerank_model, ReRankModel
@@ -174,7 +175,7 @@ class KBService(ABC):
                     score_threshold: float = SCORE_THRESHOLD,
                     search_method: str = "hybrid",
                     use_rerank: bool = True,
-                    test_mode: bool = False,
+                    time_filter: bool = True,
                     ):
         embeddings = self._load_embeddings()
         rerank_model = self._load_reranks()
@@ -184,10 +185,10 @@ class KBService(ABC):
         if search_method == "hybrid":
             docsCos = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                      embeddings=embeddings,
-                                     method="cos")
+                                     method="cos", time_filter=time_filter)
             docsBM25 = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                       embeddings=embeddings,
-                                      method="keywords")
+                                      method="keywords", time_filter=time_filter)
             docs = []
             exist_doc = set()
             ## 去重
@@ -205,11 +206,11 @@ class KBService(ABC):
         elif search_method == "cos":
             docs = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                   embeddings=embeddings,
-                                  method="cos")
+                                  method="cos", time_filter=time_filter)
         elif search_method == "keywords":
             docs = self.do_search(query=query, top_k=top_k_1, score_threshold=score_threshold,
                                   embeddings=embeddings,
-                                  method="keywords")
+                                  method="keywords", time_filter=time_filter)
         logger.info("召回阶段完成，一共召回了{}个结果".format(len(docs)))
         # logger.info("召回结果如下：")
         # for doc in docs:
@@ -219,10 +220,11 @@ class KBService(ABC):
             return docs[:top_k]
 
         # 排序阶段
-        if test_mode:
-            docs = rerank_model.rerankOnlyModel(docs, query, top_k)
-        else:
-            docs = rerank_model.rerank(docs, query, top_k)
+        # if time_filter:
+        #     out_time_query, time_words = query_time_extract(query)
+        #     docs = rerank_model.rerank(docs, out_time_query, top_k)
+        # else:
+        docs = rerank_model.rerank(docs, query, top_k)
         return docs
 
     def search_docs_multiQ(self,

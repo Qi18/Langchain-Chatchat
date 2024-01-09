@@ -1,10 +1,9 @@
 import json
+from math import inf
 import os
 import sys
-
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from server.knowledge_base.utils import KnowledgeFile
-
-sys.path.append("../../")
 from server.chat.chat import chat_local
 from server.knowledge_base.kb_service.base import KBServiceFactory
 from server.knowledge_base.kb_service.es_kb_service import ESKBService
@@ -23,13 +22,14 @@ def genCorpus(filepath):
                 hasSuc.add(temp["name"])
     ans = []
     for info in infos:
-        if "_" in os.path.basename(info.metadata["source"]):
+        print(info)
+        if "_" in os.path.basename(info["metadata"]["source"]):
             continue
-        filename = os.path.basename(info.metadata["source"]) + "__" + str(info.metadata["chunk_index"])
+        filename = os.path.basename(info["metadata"]["source"]) + "__" + str(info["metadata"]["chunk_index"])
         if filename in hasSuc:
             continue
 
-        result = chat_local(query=template(os.path.basename(info.metadata["source"]), info.page_content, 5),
+        result = chat_local(query=template(os.path.basename(info["metadata"]["source"]), info["text"], 5),
                             temperature=0.1)
         print(result)
         try:
@@ -59,21 +59,22 @@ def template(title, content, num: int = 5):
 
 esService = ESKBService("习近平重要讲话数据库")
 def data_change():
-    origin_file = "corpus.jsonl"
+    origin_file = "/data/lrq/llm/sync/Langchain-Chatchat/tool/corpus/corpus1.jsonl"
     with open(origin_file, "r") as file:
         lines = file.readlines()
     ans = []
-    file = open("toy_finetune_data.jsonl", "w+")
+    file = open("/data/lrq/llm/sync/Langchain-Chatchat/tool/corpus/toy_finetune_data.jsonl", "w+")
     for line in lines:
-        res = {}
         data = json.loads(line)
-        res["query"] = data["query"]
-        res["pos"] = [query_es(data["name"])]
-        res["neg"] = []
-        ans.append(res)
-        if len(ans) > 500:
-            file.write('\n'.join([json.dumps(item, ensure_ascii=False) for item in ans]) + '\n')
-            ans = []
+        for query in data["query"]:
+            res = {}
+            res["query"] = query
+            res["pos"] = [query_es(data["name"])]
+            res["neg"] = []
+            ans.append(res)
+            if len(ans) > 500:
+                file.write('\n'.join([json.dumps(item, ensure_ascii=False) for item in ans]) + '\n')
+                ans = []
     if len(ans) != 0:
         with open("toy_finetune_data.jsonl", "a+") as file:
             file.write('\n'.join([json.dumps(item, ensure_ascii=False) for item in ans]) + '\n')
@@ -81,15 +82,19 @@ def data_change():
 
 def query_es(name):
     infos = esService.find_doc(kb_file=KnowledgeFile(filename=name.split("_")[0], knowledge_base_name="习近平重要讲话数据库"), size=max(10000, int(name.split("__")[1])))
+    print(infos)
     for info in infos:
+        print(info["metadata"]["chunk_index"])
         if info["metadata"]["chunk_index"] == int(name.split("__")[1]):
+            print(f"find {name}")
             return info["content"]
-    print(name)
+    print(f"no {name}")
 
 
 
 if __name__ == "__main__":
-    filepath = "corpus1.jsonl"
+    filepath = "corpus.jsonl"
     genCorpus(filepath)
-    data_change()
+    # data_change()
+    # query_es("实现中华民族伟大复兴.txt__0")
 

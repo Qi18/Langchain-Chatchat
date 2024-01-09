@@ -1,3 +1,5 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import torch
 from fastapi import Body
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoModelForTokenClassification, pipeline
@@ -95,6 +97,7 @@ def load_ner_model(model: str = NER_MODEL):
         ner_modelPool[model] = NerModel(model)
     return ner_modelPool[model]
 
+
 def query_ir(query: str):
     ir_model = load_intent_recognition_model()
     intent = ir_model.query_intent_recognition(query)
@@ -105,9 +108,6 @@ def query_ner(query: str):
     ner_model = load_ner_model()
     entities = ner_model.ner(query)
     return entities
-
-def ir_query(query: str = Body(..., description="用户输入", examples=["你好"]),):
-    return query_ir(query)
 
 
 if __name__ == "__main__":
